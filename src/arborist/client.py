@@ -1,0 +1,483 @@
+"""Thin Scanopy API client (§5.2) — every HTTP call Arborist makes lives here.
+
+Hardening per §5.6:
+- TLS verification on by default, custom CA supported.
+- 429s retried honoring Retry-After; X-RateLimit-Remaining respected proactively.
+- Pagination never uses limit=0 (Scanopy treats 0 as "no limit").
+- 404 on a host ID triggers re-resolution by name/IP/MAC before failing.
+- 401/403/402 mapped to actionable messages (see errors.py).
+- Because Scanopy's SPA catch-all answers *unknown* /api paths with 200 text/html,
+  every response is content-type-checked before parsing.
+
+Write safety per §2: the only write paths are curated-overlay fields. Host
+updates are read-modify-write: current discovered-layer values are echoed back
+verbatim and child arrays (ip_addresses/ports/services/credential_assignments)
+are always omitted, which Scanopy documents as "preserve existing".
+"""
+
+from __future__ import annotations
+
+import re
+import uuid as uuid_mod
+from typing import Any, Sequence
+
+import anyio
+import httpx
+
+from .compat import CompatResult, check_compat
+from .config import Config
+from .errors import (
+    ArboristError,
+    HostNotFoundError,
+    ScanopyApiError,
+    VersionCompatError,
+)
+
+_UNSET = object()
+
+_MAX_RETRIES = 3
+_MAX_RETRY_WAIT_S = 30.0
+_PAGE_SIZE = 200
+_RESOLVE_SCAN_CAP = 2000
+
+
+class AmbiguousSelectorError(ArboristError):
+    """A host selector matched more than one host."""
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        uuid_mod.UUID(value)
+        return True
+    except ValueError:
+        return False
+
+
+def _norm_mac(value: str) -> str:
+    return re.sub(r"[^0-9a-f]", "", value.lower())
+
+
+def clamp_limit(limit: int | None, default: int = 100) -> int:
+    """Pagination guard: Scanopy's limit=0 means unbounded — never send it."""
+    if limit is None:
+        limit = default
+    return max(1, min(int(limit), 1000))
+
+
+class ScanopyClient:
+    def __init__(self, cfg: Config) -> None:
+        self._cfg = cfg
+        self._org_id: str | None = None
+        verify: bool | str = cfg.tls_ca_path if cfg.tls_ca_path else cfg.tls_verify
+        self._http = httpx.AsyncClient(
+            base_url=cfg.base_url,
+            headers={
+                "Authorization": f"Bearer {cfg.api_key}",
+                "Accept": "application/json",
+            },
+            verify=verify,
+            timeout=httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=60.0),
+        )
+
+    async def aclose(self) -> None:
+        await self._http.aclose()
+
+    # ------------------------------------------------------------------ core
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: Any = None,
+        raw_text: bool = False,
+    ) -> Any:
+        resp: httpx.Response | None = None
+        for attempt in range(_MAX_RETRIES + 1):
+            resp = await self._http.request(method, path, params=params, json=json_body)
+            if resp.status_code != 429 or attempt == _MAX_RETRIES:
+                break
+            wait = _retry_after_seconds(resp) or (2.0 * (attempt + 1))
+            await anyio.sleep(min(wait, _MAX_RETRY_WAIT_S))
+        assert resp is not None
+
+        # Proactive backoff when the rate-limit budget is nearly spent.
+        remaining = resp.headers.get("X-RateLimit-Remaining")
+        if remaining is not None and remaining.isdigit() and int(remaining) <= 3:
+            await anyio.sleep(0.5)
+
+        content_type = resp.headers.get("content-type", "").split(";")[0].strip().lower()
+
+        if raw_text:
+            if resp.status_code < 400 and content_type not in ("text/html",):
+                return resp.text
+            # fall through to error handling; HTML on a raw endpoint means SPA fallback
+
+        if content_type != "application/json":
+            raise ScanopyApiError(
+                resp.status_code,
+                f"Non-JSON response ({content_type or 'no content-type'}) from {method} {path}. "
+                "Scanopy's web UI answers unknown API paths with its HTML shell, so this "
+                "endpoint most likely does not exist on the connected server version.",
+            )
+
+        try:
+            envelope = resp.json()
+        except ValueError as exc:
+            raise ScanopyApiError(
+                resp.status_code, f"Unparseable JSON from {method} {path}: {exc}"
+            ) from exc
+
+        if isinstance(envelope, dict) and envelope.get("success") is True:
+            return envelope.get("data")
+
+        message = "unknown error"
+        code = None
+        params_out: dict[str, Any] | None = None
+        if isinstance(envelope, dict):
+            message = str(envelope.get("error", message))
+            code = envelope.get("code")
+            params_out = envelope.get("params")
+        raise ScanopyApiError(resp.status_code, message, code=code, params=params_out)
+
+    async def _get_page(
+        self, path: str, *, params: dict[str, Any] | None = None, limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        q = dict(params or {})
+        q["limit"] = clamp_limit(limit)
+        q["offset"] = max(0, int(offset))
+        data = await self._request("GET", path, params=q)
+        return data if isinstance(data, list) else []
+
+    async def _get_all(
+        self, path: str, *, params: dict[str, Any] | None = None, cap: int = _RESOLVE_SCAN_CAP,
+    ) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        offset = 0
+        while len(items) < cap:
+            page = await self._get_page(path, params=params, limit=_PAGE_SIZE, offset=offset)
+            items.extend(page)
+            if len(page) < _PAGE_SIZE:
+                break
+            offset += _PAGE_SIZE
+        return items[:cap]
+
+    def _network_params(self, network_id: str | None = None) -> dict[str, Any]:
+        nid = network_id or self._cfg.network_id
+        return {"network_id": nid} if nid else {}
+
+    # --------------------------------------------------------------- version
+
+    async def version_info(self) -> dict[str, Any]:
+        return await self._request("GET", "/api/version")
+
+    async def startup_guard(self) -> CompatResult:
+        """§5.4 hard gate. Raises VersionCompatError unless the override is set."""
+        info = await self.version_info()
+        result = check_compat(
+            str(info.get("server_version", "")), info.get("api_version")
+        )
+        if not result.ok and not self._cfg.allow_untested_version:
+            raise VersionCompatError(result.reason)
+        return result
+
+    # ----------------------------------------------------------------- reads
+
+    async def list_networks(self) -> list[dict[str, Any]]:
+        return await self._get_all("/api/v1/networks")
+
+    async def list_hosts(
+        self,
+        *,
+        network_id: str | None = None,
+        tag_ids: Sequence[str] | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        params = self._network_params(network_id)
+        if tag_ids:
+            params["tag_ids"] = ",".join(tag_ids)
+        return await self._get_page("/api/v1/hosts", params=params, limit=limit, offset=offset)
+
+    async def get_host(self, host_id: str) -> dict[str, Any]:
+        return await self._request("GET", f"/api/v1/hosts/{host_id}")
+
+    async def list_services(
+        self, *, network_id: str | None = None, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        return await self._get_page(
+            "/api/v1/services", params=self._network_params(network_id), limit=limit,
+            offset=offset,
+        )
+
+    async def list_subnets(self, *, network_id: str | None = None) -> list[dict[str, Any]]:
+        return await self._get_all("/api/v1/subnets", params=self._network_params(network_id))
+
+    async def list_ports(
+        self, *, network_id: str | None = None, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        return await self._get_page(
+            "/api/v1/ports", params=self._network_params(network_id), limit=limit, offset=offset
+        )
+
+    async def list_ip_addresses(
+        self, *, network_id: str | None = None, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        return await self._get_page(
+            "/api/v1/ip-addresses", params=self._network_params(network_id), limit=limit,
+            offset=offset,
+        )
+
+    async def list_snmp_interfaces(
+        self, *, network_id: str | None = None, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        return await self._get_page(
+            "/api/v1/if-entries", params=self._network_params(network_id), limit=limit,
+            offset=offset,
+        )
+
+    async def list_dependencies(self, *, network_id: str | None = None) -> list[dict[str, Any]]:
+        return await self._get_all(
+            "/api/v1/dependencies", params=self._network_params(network_id)
+        )
+
+    async def list_tags(self) -> list[dict[str, Any]]:
+        return await self._get_all("/api/v1/tags")
+
+    async def list_bindings(self, *, network_id: str | None = None) -> list[dict[str, Any]]:
+        return await self._get_all("/api/v1/bindings", params=self._network_params(network_id))
+
+    async def list_topologies(self, *, network_id: str | None = None) -> list[dict[str, Any]]:
+        return await self._get_all("/api/v1/topology", params=self._network_params(network_id))
+
+    async def export_topology_mermaid(self, topology_id: str, *, view: str | None = None) -> str:
+        params = {"view": view} if view else None
+        return await self._request(
+            "GET", f"/api/v1/topology/{topology_id}/export/mermaid", params=params,
+            raw_text=True,
+        )
+
+    # ------------------------------------------------------- host resolution
+
+    async def resolve_host(self, selector: str) -> dict[str, Any]:
+        """Resolve a host by UUID, name, hostname, IP, or MAC (§5.6).
+
+        A UUID that 404s falls back to a scan so a consolidation-retired ID
+        still produces useful candidates instead of a bare 404.
+        """
+        s = selector.strip()
+        attempted: list[str] = []
+
+        if _is_uuid(s):
+            attempted.append("id")
+            try:
+                return await self.get_host(s)
+            except ScanopyApiError as exc:
+                if exc.status != 404:
+                    raise
+                # Retired ID (consolidation deletes merged records): fall through.
+
+        hosts = await self._get_all("/api/v1/hosts", params=self._network_params())
+        attempted.extend(["name", "hostname", "ip", "mac"])
+
+        lowered = s.lower()
+        mac = _norm_mac(s)
+
+        def matches(h: dict[str, Any]) -> bool:
+            if str(h.get("name", "")).lower() == lowered:
+                return True
+            if (h.get("hostname") or "").lower() == lowered:
+                return True
+            for ip in h.get("ip_addresses", []):
+                if ip.get("ip_address") == s:
+                    return True
+                if mac and len(mac) == 12 and _norm_mac(ip.get("mac_address") or "") == mac:
+                    return True
+            return False
+
+        found = [h for h in hosts if matches(h)]
+        if len(found) == 1:
+            return found[0]
+        if len(found) > 1:
+            names = ", ".join(f"{h['name']} ({h['id']})" for h in found[:10])
+            raise AmbiguousSelectorError(
+                f"Selector '{selector}' matched {len(found)} hosts: {names}. "
+                "Use the host id to disambiguate."
+            )
+
+        candidates = [h for h in hosts if lowered and lowered in str(h.get("name", "")).lower()]
+        raise HostNotFoundError(
+            selector,
+            attempted=attempted,
+            candidates=[{"id": h["id"], "name": h.get("name")} for h in candidates],
+        )
+
+    # ---------------------------------------------------------------- writes
+
+    def _assert_in_scope(self, host: dict[str, Any]) -> None:
+        """SCANOPY_NETWORK_ID, when set, confines writes to that network."""
+        nid = self._cfg.network_id
+        if nid and str(host.get("network_id")) != nid:
+            raise ArboristError(
+                f"Host '{host.get('name')}' ({host.get('id')}) belongs to network "
+                f"{host.get('network_id')}, but Arborist is scoped to network {nid} "
+                "(SCANOPY_NETWORK_ID). Refusing to modify it."
+            )
+
+    async def update_host_curated(
+        self,
+        host_id: str,
+        *,
+        name: str | None = None,
+        description: Any = _UNSET,
+        hidden: bool | None = None,
+        tags: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        """Update only curated-overlay fields on a host (§2).
+
+        Read-modify-write against the current record:
+        - discovered/scalar fields (hostname, virtualization) echoed verbatim —
+          Scanopy's PUT is full-replace for scalars, so omitting them would
+          clear discovered data;
+        - `tags` echoed unless explicitly replaced — Scanopy clears tags when
+          the field is omitted;
+        - child arrays always omitted, which Scanopy documents as "preserve";
+        - expected_updated_at passed for optimistic locking, so a concurrent
+          change (e.g. a scan) surfaces as a conflict instead of a lost update.
+        """
+        current = await self.get_host(host_id)
+        self._assert_in_scope(current)
+
+        payload: dict[str, Any] = {
+            "id": current["id"],
+            "name": name if name is not None else current["name"],
+            "hostname": current.get("hostname"),
+            "description": (
+                current.get("description") if description is _UNSET else description
+            ),
+            "hidden": hidden if hidden is not None else current["hidden"],
+            "tags": list(tags) if tags is not None else list(current.get("tags", [])),
+            "virtualization": current.get("virtualization"),
+            "expected_updated_at": current.get("updated_at"),
+        }
+        return await self._request(
+            "PUT", f"/api/v1/hosts/{current['id']}", json_body=payload
+        )
+
+    # Tags ------------------------------------------------------------------
+
+    async def organization_id(self) -> str:
+        """The caller's organization id (needed by tag creation), fetched once."""
+        if getattr(self, "_org_id", None) is None:
+            orgs = await self._get_all("/api/v1/organizations")
+            if not orgs:
+                raise ArboristError("Could not determine organization id from the API key.")
+            self._org_id = str(orgs[0]["id"])
+        return self._org_id
+
+    async def create_tag(
+        self,
+        name: str,
+        *,
+        color: str = "Gray",
+        description: str | None = None,
+        is_application: bool = False,
+    ) -> dict[str, Any]:
+        # Scanopy's Tag deserializer requires every TagBase field to be present,
+        # including a nullable description and the organization id.
+        body: dict[str, Any] = {
+            "name": name,
+            "color": color,
+            "description": description,
+            "is_application": is_application,
+            "organization_id": await self.organization_id(),
+        }
+        return await self._request("POST", "/api/v1/tags", json_body=body)
+
+    async def update_tag(self, tag_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        current = await self._request("GET", f"/api/v1/tags/{tag_id}")
+        merged = {**current, **patch, "id": tag_id}
+        return await self._request("PUT", f"/api/v1/tags/{tag_id}", json_body=merged)
+
+    async def delete_tag(self, tag_id: str) -> None:
+        await self._request("DELETE", f"/api/v1/tags/{tag_id}")
+
+    async def set_entity_tags(
+        self, entity_type: str, entity_id: str, tag_ids: Sequence[str]
+    ) -> dict[str, Any] | None:
+        return await self._request(
+            "PUT",
+            "/api/v1/tags/assign",
+            json_body={
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "tag_ids": list(tag_ids),
+            },
+        )
+
+    async def bulk_tag(
+        self, tag_id: str, entity_type: str, entity_ids: Sequence[str], *, remove: bool = False
+    ) -> dict[str, Any] | None:
+        op = "bulk-remove" if remove else "bulk-add"
+        return await self._request(
+            "POST",
+            f"/api/v1/tags/assign/{op}",
+            json_body={
+                "entity_type": entity_type,
+                "entity_ids": list(entity_ids),
+                "tag_id": tag_id,
+            },
+        )
+
+    async def resolve_tag(self, selector: str) -> dict[str, Any]:
+        s = selector.strip()
+        tags = await self.list_tags()
+        if _is_uuid(s):
+            for t in tags:
+                if t["id"] == s:
+                    return t
+            raise ArboristError(f"No tag with id {s}.")
+        matches = [t for t in tags if t["name"].lower() == s.lower()]
+        if len(matches) == 1:
+            return matches[0]
+        if not matches:
+            known = ", ".join(sorted(t["name"] for t in tags)) or "(none)"
+            raise ArboristError(f"No tag named '{selector}'. Existing tags: {known}")
+        raise AmbiguousSelectorError(f"Tag name '{selector}' matched {len(matches)} tags.")
+
+    # Bindings ---------------------------------------------------------------
+
+    async def create_binding(self, body: dict[str, Any]) -> dict[str, Any]:
+        return await self._request("POST", "/api/v1/bindings", json_body=body)
+
+    async def update_binding(self, binding_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        return await self._request(
+            "PUT", f"/api/v1/bindings/{binding_id}", json_body={**body, "id": binding_id}
+        )
+
+    async def delete_binding(self, binding_id: str) -> None:
+        await self._request("DELETE", f"/api/v1/bindings/{binding_id}")
+
+    # Consolidation ----------------------------------------------------------
+
+    async def consolidate_hosts(
+        self, destination_id: str, other_id: str
+    ) -> dict[str, Any]:
+        """Merge other's interfaces/services/ports into destination; Scanopy
+        deletes the source record. Validation (same-host, cross-network,
+        daemon-attached source) is surfaced from the server's 400s."""
+        return await self._request(
+            "PUT", f"/api/v1/hosts/{destination_id}/consolidate/{other_id}"
+        )
+
+
+def _retry_after_seconds(resp: httpx.Response) -> float | None:
+    raw = resp.headers.get("Retry-After")
+    if raw is None:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return None
