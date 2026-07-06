@@ -1,0 +1,30 @@
+# Build context filter for deploy/docker/Dockerfile (context = repo root).
+# Keep the context down to what `uv sync --no-editable` actually needs:
+# pyproject.toml, uv.lock, README.md (referenced by pyproject), and src/.
+
+.git
+.gitignore
+.venv
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+dist/
+*.egg-info/
+
+# Never let secrets or local env files into an image.
+.env
+.env.*
+
+# Not needed inside the image.
+tests/
+deploy/
+.dockerignore
+
+# Editor / scratch leftovers.
+*.swp
+*.swo
+*~
+.DS_Store
+scratch/
+scratchpad/

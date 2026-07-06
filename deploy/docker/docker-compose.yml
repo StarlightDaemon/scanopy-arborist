@@ -1,0 +1,46 @@
+# Arborist (MCP server for Scanopy) — Docker Compose deployment.
+#
+# Usage:
+#   cp .env.example .env   # fill in real values; .env stays out of git/images
+#   docker compose up -d
+#
+# Pulls the published image by default; `docker compose up --build` (or a
+# missing image) falls back to building from the repo root.
+
+services:
+  arborist:
+    image: ghcr.io/OWNER/scanopy-arborist-mcp:latest
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    ports:
+      # Published to the Docker host's loopback ONLY. Arborist speaks plain
+      # HTTP with a bearer token; if you widen this to "60074:60074" (all
+      # interfaces) put a TLS-terminating reverse proxy (Caddy, nginx,
+      # Traefik...) in front — do not expose the plain-HTTP port to a network.
+      - "127.0.0.1:60074:60074"
+    environment:
+      # Where the Scanopy instance lives. Use host.docker.internal to reach a
+      # Scanopy running on the Docker host itself (see extra_hosts below).
+      SCANOPY_BASE_URL: ${SCANOPY_BASE_URL}
+      # Scanopy user API key (Platform > API Keys, starts with 'scp_u_').
+      SCANOPY_API_KEY: ${SCANOPY_API_KEY}
+      # Arborist's own HTTP gate secret (>=16 chars), deliberately separate
+      # from the Scanopy API key.
+      ARBORIST_AUTH_TOKEN: ${ARBORIST_AUTH_TOKEN}
+      # The container binds 0.0.0.0 internally (required to be reachable
+      # through the port mapping); this compose file publishes only to host
+      # loopback — TLS and any wider exposure are the operator's perimeter.
+      ARBORIST_TLS_POSTURE: terminated-upstream
+      # DNS-rebinding protection: Host header values clients may use.
+      ARBORIST_ALLOWED_HOSTS: localhost:60074,127.0.0.1:60074
+      # --- Optional ---
+      # ARBORIST_PROFILE: readwrite            # default: readonly
+      # SCANOPY_NETWORK_ID: ${SCANOPY_NETWORK_ID}   # pin to one network
+      # ARBORIST_ENABLE_CONSOLIDATION: "true"  # requires readwrite profile
+    extra_hosts:
+      # Lets the container reach a Scanopy on the Docker host via
+      # http://host.docker.internal:<port> (no-op on Docker Desktop, needed on
+      # Linux engines).
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

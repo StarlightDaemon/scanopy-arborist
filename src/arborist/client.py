@@ -98,7 +98,9 @@ class ScanopyClient:
             resp = await self._http.request(method, path, params=params, json=json_body)
             if resp.status_code != 429 or attempt == _MAX_RETRIES:
                 break
-            wait = _retry_after_seconds(resp) or (2.0 * (attempt + 1))
+            wait = _retry_after_seconds(resp)
+            if wait is None:
+                wait = 2.0 * (attempt + 1)
             await anyio.sleep(min(wait, _MAX_RETRY_WAIT_S))
         assert resp is not None
 
@@ -203,6 +205,9 @@ class ScanopyClient:
 
     async def get_host(self, host_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/api/v1/hosts/{host_id}")
+
+    async def get_service(self, service_id: str) -> dict[str, Any]:
+        return await self._request("GET", f"/api/v1/services/{service_id}")
 
     async def list_services(
         self, *, network_id: str | None = None, limit: int | None = None, offset: int = 0
@@ -371,11 +376,24 @@ class ScanopyClient:
     async def organization_id(self) -> str:
         """The caller's organization id (needed by tag creation), fetched once."""
         if getattr(self, "_org_id", None) is None:
-            orgs = await self._get_all("/api/v1/organizations")
-            if not orgs:
-                raise ArboristError("Could not determine organization id from the API key.")
-            self._org_id = str(orgs[0]["id"])
+            self._org_id = await self._discover_organization_id()
         return self._org_id
+
+    async def _discover_organization_id(self) -> str:
+        # /api/v1/organizations requires a user session on 0.17.3 — under
+        # API-key auth it answers 403 "User context required" — so fall back
+        # to the organization id every network record carries.
+        try:
+            orgs = await self._get_all("/api/v1/organizations")
+            if orgs:
+                return str(orgs[0]["id"])
+        except ScanopyApiError as exc:
+            if exc.status not in (401, 402, 403):
+                raise
+        for net in await self.list_networks():
+            if net.get("organization_id"):
+                return str(net["organization_id"])
+        raise ArboristError("Could not determine organization id from the API key.")
 
     async def create_tag(
         self,

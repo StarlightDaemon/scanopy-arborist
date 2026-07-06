@@ -1,0 +1,64 @@
+# arborist.container — Podman Quadlet unit for Arborist (MCP server for Scanopy).
+# Syntax: podman-systemd.unit(5). Requires podman >= 4.6 (Quadlet with Secret= env targets).
+#
+# Install:
+#   rootful:   copy to /etc/containers/systemd/arborist.container
+#              then: systemctl daemon-reload && systemctl start arborist
+#   rootless:  copy to ~/.config/containers/systemd/arborist.container
+#              then: systemctl --user daemon-reload && systemctl --user start arborist
+#              For start-at-boot without an active login session:
+#                loginctl enable-linger <user>
+#
+# Secrets (create BEFORE starting; as the same user that runs the container):
+#   printf %s "<scanopy-api-key>"        | podman secret create scanopy-api-key -
+#   printf %s "<random-token-16+-chars>" | podman secret create arborist-gate-token -
+# The gate token is Arborist's own HTTP bearer token (ARBORIST_AUTH_TOKEN), NOT a
+# Scanopy credential. Generate one with e.g.: openssl rand -hex 32
+#
+# AutoUpdate=registry only takes effect if the auto-update timer is enabled:
+#   rootful:   systemctl enable --now podman-auto-update.timer
+#   rootless:  systemctl --user enable --now podman-auto-update.timer
+
+[Unit]
+Description=Arborist — MCP server for Scanopy
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=ghcr.io/OWNER/scanopy-arborist-mcp:latest
+ContainerName=arborist
+
+# Loopback-only publish: only this machine (or a reverse proxy on it) can reach
+# Arborist. Widen deliberately, and keep ARBORIST_ALLOWED_HOSTS in sync.
+PublishPort=127.0.0.1:60074:60074
+
+# --- Required configuration ---------------------------------------------
+Environment=SCANOPY_BASE_URL=http://scanopy.example.lan:60072
+# Inside the container Arborist binds 0.0.0.0 (non-loopback), so a declared TLS
+# posture and an allowlist of Host headers are required. 'terminated-upstream'
+# means plain HTTP is acceptable because exposure is controlled outside the
+# container (here: the 127.0.0.1 publish above, or your TLS-terminating proxy).
+Environment=ARBORIST_TLS_POSTURE=terminated-upstream
+Environment=ARBORIST_ALLOWED_HOSTS=localhost:60074,127.0.0.1:60074
+
+# --- Optional configuration ---------------------------------------------
+# Environment=ARBORIST_PROFILE=readwrite
+# Environment=SCANOPY_NETWORK_ID=<uuid-of-target-network>
+# Environment=ARBORIST_ENABLE_CONSOLIDATION=true
+
+# Secrets are injected as environment variables; they never appear in the
+# image, the unit file, or `podman inspect` output.
+Secret=scanopy-api-key,type=env,target=SCANOPY_API_KEY
+Secret=arborist-gate-token,type=env,target=ARBORIST_AUTH_TOKEN
+
+# Pull new :latest images via podman-auto-update.timer (see header).
+AutoUpdate=registry
+
+# No Exec= needed: the image CMD already runs the HTTP transport on 0.0.0.0:60074.
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

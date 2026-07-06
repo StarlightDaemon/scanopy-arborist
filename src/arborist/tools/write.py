@@ -212,6 +212,22 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
     # ---------------------------------------------------------------- bindings
 
+    async def _binding_body_for(
+        service_id: str, binding_type: str, port_id: str | None, ip_address_id: str | None
+    ) -> dict[str, Any]:
+        # Scanopy requires network_id in binding bodies; derive it from the
+        # owning service, which also lets the network-scope confinement apply.
+        service = await client.get_service(service_id)
+        if ctx.cfg.network_id and str(service.get("network_id")) != ctx.cfg.network_id:
+            raise ValueError(
+                f"Service {service_id} belongs to network {service.get('network_id')}, but "
+                f"Arborist is scoped to network {ctx.cfg.network_id} (SCANOPY_NETWORK_ID). "
+                "Refusing to modify its bindings."
+            )
+        body = _binding_body(service_id, binding_type, port_id, ip_address_id)
+        body["network_id"] = service["network_id"]
+        return body
+
     @mcp.tool(annotations=_WRITE_SAFE)
     async def create_binding(
         service_id: str,
@@ -222,9 +238,10 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         """Bind a service to network resources on its host. binding_type 'Port' needs
         port_id (ip_address_id optional; null = listens on all IPs — note this supersedes
         any per-IP bindings for that port). binding_type 'IPAddress' needs ip_address_id
-        (service present at an IP without a specific port, e.g. a gateway). Conflicting
-        bindings are rejected by Scanopy with a 409 explaining the clash."""
-        body = _binding_body(service_id, binding_type, port_id, ip_address_id)
+        (service present at an IP without a specific port, e.g. a gateway). A binding
+        whose type clashes with an existing one on the same IP/port is rejected by
+        Scanopy with a 409 explaining the conflict (exact duplicates are not rejected)."""
+        body = await _binding_body_for(service_id, binding_type, port_id, ip_address_id)
         created = await client.create_binding(body)
         return redact({"created": created})
 
@@ -238,7 +255,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     ) -> dict[str, Any]:
         """Update an existing binding (same fields and 409 conflict rules as
         create_binding)."""
-        body = _binding_body(service_id, binding_type, port_id, ip_address_id)
+        body = await _binding_body_for(service_id, binding_type, port_id, ip_address_id)
         updated = await client.update_binding(binding_id, body)
         return redact({"updated": updated})
 
