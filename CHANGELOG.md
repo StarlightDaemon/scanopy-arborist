@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+### Fixed (second review pass)
+
+- **Tag-object scope confinement (fail-closed).** `delete_tag` now enumerates
+  every entity carrying the tag and refuses when `SCANOPY_NETWORK_ID` is set and
+  any of them fall outside the configured network (deleting a tag strips it
+  org-wide). `create_tag`/`update_tag` don't touch entity associations and
+  proceed. Documented as the general policy for any org-scoped-but-not-network-
+  scoped resource.
+- `set_host_tags([])` now genuinely clears (Scanopy's assign endpoint no-ops on
+  an empty list, so tags are removed individually) instead of silently
+  reporting success while leaving tags in place.
+- Non-JSON `text/plain` 4xx bodies from Scanopy (serde/path-param errors) are
+  surfaced verbatim instead of the misleading "endpoint most likely does not
+  exist" version-incompatibility hint (which is now reserved for actual
+  `text/html` SPA fallbacks).
+- `bulk_update_hosts` coerces `hidden` to a real boolean once, so the plan and
+  apply phases can never disagree (`bool("false")` used to plan the opposite of
+  what apply sent); un-coercible values become a clean per-row error.
+- `update_host_metadata` rejects passing both `description` and
+  `clear_description`, and short-circuits a no-op update instead of issuing a
+  PUT that would move `updated_at`.
+- Binding tools reject a `port_id` supplied with `binding_type="IPAddress"`
+  instead of silently dropping it.
+- `bulk_update_hosts` plan phase excludes out-of-scope hosts entirely (they
+  become error rows) rather than echoing their name/description.
+
 ## v0.1.0 — 2026-07-06 (first release)
 
 First release of Arborist, an MCP server for [Scanopy](https://scanopy.net)

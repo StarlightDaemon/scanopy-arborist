@@ -23,6 +23,12 @@ Arborist enforces a hard write boundary. Scanopy's scanner owns everything it di
 
 Host updates go through a read-modify-write path that echoes discovered fields back verbatim and never sends child arrays, so a write cannot clobber scanner data even accidentally. Every tool response is also passed through a credential redactor before it reaches the model.
 
+### Network-scope confinement
+
+When `SCANOPY_NETWORK_ID` is set, Arborist refuses to *modify* anything outside that network. For network-scoped entities (hosts, services, subnets, bindings, …) it verifies the resolved entity's `network_id` before every write — including when you address it by a raw UUID, which Scanopy does not network-filter server-side.
+
+Some Scanopy resources are **organization-scoped, not network-scoped** — a tag, for example, has no `network_id` of its own. For those, confinement means checking the network-scoped *entities the operation actually touches*, and **failing closed** if any fall outside the configured scope. Concretely: `delete_tag` refuses when the tag is applied to any out-of-scope entity (deleting a tag strips it org-wide), while `create_tag`/`update_tag` — which don't touch entity associations — proceed. This is the general rule for any org-scoped-but-not-network-scoped resource; anything similar added later (e.g. Groups, were it ever built) inherits it.
+
 ## Supported Scanopy versions
 
 Verified live against **Scanopy 0.17.3**; supported range **`>=0.17.2,<0.18.0`**.
@@ -107,7 +113,7 @@ All configuration is via environment variables. `SCANOPY_*` describes the target
 |---|---|---|---|
 | `SCANOPY_BASE_URL` | *(required)* | both | Scanopy URL, e.g. `http://scanopy.lan:60072`. Must start with `http://` or `https://`. |
 | `SCANOPY_API_KEY` | *(required)* | both | Scanopy user API key (`scp_u_...`), Platform > API Keys. |
-| `SCANOPY_NETWORK_ID` | unset | both | Pin Arborist to one Scanopy network: list tools default to it, and writes to hosts outside it are refused. |
+| `SCANOPY_NETWORK_ID` | unset | both | Pin Arborist to one Scanopy network: list tools default to it, and writes to entities outside it are refused (org-scoped resources like tags fail closed against their out-of-scope uses — see "Network-scope confinement"). |
 | `SCANOPY_TLS_VERIFY` | `true` | both | Verify Scanopy's TLS certificate. |
 | `SCANOPY_TLS_CA_PATH` | unset | both | Custom CA bundle for verifying Scanopy. Mutually exclusive with `SCANOPY_TLS_VERIFY=false`. |
 | `ARBORIST_PROFILE` | `readonly` | both | `readonly` or `readwrite`. Gates which tools are registered at all. |

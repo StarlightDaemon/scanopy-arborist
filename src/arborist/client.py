@@ -122,17 +122,29 @@ class ScanopyClient:
 
         content_type = resp.headers.get("content-type", "").split(";")[0].strip().lower()
 
-        if raw_text:
-            if resp.status_code < 400 and content_type not in ("text/html",):
-                return resp.text
-            # fall through to error handling; HTML on a raw endpoint means SPA fallback
+        if raw_text and resp.status_code < 400 and content_type != "text/html":
+            return resp.text
 
         if content_type != "application/json":
+            # Scanopy answers *unknown* /api paths with its SPA HTML shell (200
+            # text/html) — that genuinely means "endpoint not on this version".
+            # But real 4xx errors arrive as text/plain (axum path-param parse
+            # failures -> 400, serde body rejections -> 422); surface those
+            # verbatim instead of the misleading version-incompatibility hint.
+            if content_type == "text/html":
+                raise ScanopyApiError(
+                    resp.status_code,
+                    f"Non-JSON (text/html) response from {method} {path}. Scanopy's web UI "
+                    "answers unknown API paths with its HTML shell, so this endpoint most "
+                    "likely does not exist on the connected server version.",
+                )
+            body = resp.text.strip()
             raise ScanopyApiError(
                 resp.status_code,
-                f"Non-JSON response ({content_type or 'no content-type'}) from {method} {path}. "
-                "Scanopy's web UI answers unknown API paths with its HTML shell, so this "
-                "endpoint most likely does not exist on the connected server version.",
+                body[:500]
+                if body
+                else f"Non-JSON ({content_type or 'no content-type'}) response "
+                f"from {method} {path}.",
             )
 
         try:
@@ -460,6 +472,39 @@ class ScanopyClient:
 
     async def delete_tag(self, tag_id: str) -> None:
         await self._request("DELETE", f"/api/v1/tags/{tag_id}")
+
+    # Every taggable entity type that carries a network_id (so its scope can be
+    # checked). The Network entity is its own network. Used by tag_usage.
+    _TAG_USAGE_PATHS = {
+        "Host": "/api/v1/hosts",
+        "Service": "/api/v1/services",
+        "Subnet": "/api/v1/subnets",
+        "Dependency": "/api/v1/dependencies",
+        "Network": "/api/v1/networks",
+    }
+
+    async def tag_usage(self, tag_id: str) -> list[dict[str, Any]]:
+        """Every entity currently carrying ``tag_id``, across ALL networks the
+        API key can see (no network filter), as
+        ``{entity_type, id, name, network_id}``.
+
+        This deliberately does NOT apply SCANOPY_NETWORK_ID scoping — its whole
+        purpose is to reveal out-of-scope uses so a deletion can fail closed.
+        """
+        usage: list[dict[str, Any]] = []
+        for etype, path in self._TAG_USAGE_PATHS.items():
+            for e in await self._get_all(path):
+                if tag_id in (e.get("tags") or []):
+                    network_id = e["id"] if etype == "Network" else e.get("network_id")
+                    usage.append(
+                        {
+                            "entity_type": etype,
+                            "id": e["id"],
+                            "name": e.get("name"),
+                            "network_id": network_id,
+                        }
+                    )
+        return usage
 
     async def set_entity_tags(
         self, entity_type: str, entity_id: str, tag_ids: Sequence[str]

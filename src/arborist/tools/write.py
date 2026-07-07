@@ -8,6 +8,14 @@ never sends child arrays.
 
 Bulk updates are two-phase per §6: called without confirm=true they return a
 diff plan and change nothing.
+
+Scope-confinement policy for org-scoped resources: some Scanopy resources
+(tags) have no network_id of their own, so SCANOPY_NETWORK_ID cannot be checked
+against the resource itself. For those, confinement means checking the network-
+scoped ENTITIES an operation actually touches — and failing closed if any fall
+outside the configured scope. This is the general rule for any org-scoped-but-
+not-network-scoped resource (see delete_tag); anything similar added later
+(e.g. Groups, if ever built) must inherit it.
 """
 
 from __future__ import annotations
@@ -18,6 +26,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from ..client import _UNSET
+from ..errors import ArboristError
 from ..redact import redact
 from . import ToolContext
 from .read import host_summary
@@ -28,6 +37,29 @@ _WRITE_DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
                                      openWorldHint=False)
 
 _TAGGABLE = {"Host", "Service", "Subnet", "Network", "Dependency"}
+
+_TRUE = {"true", "1", "yes", "on"}
+_FALSE = {"false", "0", "no", "off"}
+
+
+def _coerce_bool(value: Any, field: str = "hidden") -> bool:
+    """Strict bool coercion for values that arrive untyped from a JSON tool
+    call. Accepts real bools and the usual string/int spellings; rejects
+    anything ambiguous so the plan and apply phases can never disagree
+    (e.g. bool("false") is True, which silently inverted the plan)."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in _TRUE:
+            return True
+        if v in _FALSE:
+            return False
+    raise ValueError(
+        f"{field} must be a boolean (got {value!r}); use true/false."
+    )
 
 
 def register(mcp: FastMCP, ctx: ToolContext) -> None:
@@ -46,13 +78,32 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         """Update a host's curated metadata: display name, description, and/or hidden
         flag. `host` may be an id, name, hostname, IP, or MAC. Only the fields you pass
         change; everything Scanopy discovered (hostname, IPs, ports, services) is
-        preserved untouched. Set clear_description=true to remove the description."""
+        preserved untouched. Set clear_description=true to remove the description (do not
+        also pass description — that is a conflict)."""
+        if clear_description and description is not None:
+            raise ValueError(
+                "Pass either description or clear_description=true, not both — they "
+                "conflict. Use clear_description to remove the description, or description "
+                "to set a new one."
+            )
         record = await client.resolve_host(host)
         desc: Any = _UNSET
         if clear_description:
             desc = None
         elif description is not None:
             desc = description
+
+        # No-op short-circuit: a PUT that changes nothing still moves updated_at
+        # (the optimistic-lock token), so skip the API call entirely when the
+        # requested values already match the current record.
+        effective_desc = record.get("description") if desc is _UNSET else desc
+        if (
+            (name is None or name == record.get("name"))
+            and effective_desc == record.get("description")
+            and (hidden is None or hidden == record.get("hidden"))
+        ):
+            return redact({"unchanged": host_summary(record)})
+
         updated = await client.update_host_curated(
             record["id"],
             name=name,
@@ -69,7 +120,16 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         record = await client.resolve_host(host)
         client.assert_in_scope(record)
         tag_ids = [(await client.resolve_tag(t))["id"] for t in tags]
-        await client.set_entity_tags("Host", record["id"], tag_ids)
+        if tag_ids:
+            await client.set_entity_tags("Host", record["id"], tag_ids)
+        else:
+            # Scanopy's assign endpoint no-ops on an empty tag_ids list, so a
+            # true "clear" must explicitly remove each currently-assigned tag.
+            current = record.get("tags")
+            if current is None:
+                current = (await client.get_host(record["id"])).get("tags", [])
+            for tid in current:
+                await client.bulk_tag(tid, "Host", [record["id"]], remove=True)
         refreshed = await client.get_host(record["id"])
         return redact({"host": record["name"], "tag_ids": refreshed.get("tags", [])})
 
@@ -87,14 +147,28 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         errors: list[dict[str, Any]] = []
         resolved: list[tuple[dict[str, Any], dict[str, Any]]] = []
 
-        for u in updates:
-            # JSON nulls for name/hidden are not valid values; drop them so the
-            # plan and the apply phase agree (apply treats None as "no change").
-            u = {k: v for k, v in u.items() if not (k in ("name", "hidden") and v is None)}
+        for raw in updates:
+            # JSON nulls for name/hidden mean "no change"; drop them so plan and
+            # apply agree. Coerce hidden to a real bool ONCE (bool("false") is
+            # True, which used to invert the plan vs what apply would send).
+            u = {k: v for k, v in raw.items() if not (k in ("name", "hidden") and v is None)}
             sel = str(u.get("host", ""))
+            if "hidden" in u:
+                try:
+                    u["hidden"] = _coerce_bool(u["hidden"])
+                except ValueError as exc:
+                    errors.append({"host": sel, "error": str(exc)})
+                    continue
             try:
                 record = await client.resolve_host(sel)
             except Exception as exc:
+                errors.append({"host": sel, "error": str(exc)})
+                continue
+            # Exclude out-of-scope hosts from the plan entirely (don't surface
+            # their metadata alongside in-scope entries); apply refuses them too.
+            try:
+                client.assert_in_scope(record)
+            except ArboristError as exc:
                 errors.append({"host": sel, "error": str(exc)})
                 continue
             changes = {}
@@ -104,8 +178,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
                 changes["description"] = {
                     "from": record.get("description"), "to": u["description"],
                 }
-            if "hidden" in u and bool(u["hidden"]) != record.get("hidden"):
-                changes["hidden"] = {"from": record.get("hidden"), "to": bool(u["hidden"])}
+            if "hidden" in u and u["hidden"] != record.get("hidden"):
+                changes["hidden"] = {"from": record.get("hidden"), "to": u["hidden"]}
             plan.append({"host_id": record["id"], "host": record.get("name"),
                          "changes": changes or "no-op"})
             if changes:
@@ -181,15 +255,37 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 
     @mcp.tool(annotations=_WRITE_DESTRUCTIVE)
     async def delete_tag(tag: str, confirm: bool = False) -> dict[str, Any]:
-        """Delete a tag (by name or id). It is removed from every entity that carries it.
-        Requires confirm=true."""
+        """Delete a tag (by name or id). It is removed from EVERY entity that carries it,
+        org-wide. Requires confirm=true.
+
+        Scope safety: tags have no network of their own, so when SCANOPY_NETWORK_ID is
+        configured this refuses (fail-closed) if the tag is applied to any entity outside
+        the configured network — deleting it would strip it from out-of-scope entities."""
         current = await client.resolve_tag(tag)
+
+        in_scope_uses = out_of_scope_uses = None
+        if ctx.cfg.network_id:
+            usage = await client.tag_usage(current["id"])
+            out = [u for u in usage if str(u["network_id"]) != ctx.cfg.network_id]
+            in_scope_uses, out_of_scope_uses = len(usage) - len(out), len(out)
+            if out:
+                raise ArboristError(
+                    f"Refusing to delete tag '{current['name']}': it is applied to "
+                    f"{out_of_scope_uses} entit{'y' if out_of_scope_uses == 1 else 'ies'} "
+                    f"outside the configured network scope ({ctx.cfg.network_id}). Deleting "
+                    "a tag removes it org-wide, which would touch entities Arborist is not "
+                    f"scoped to modify. In-scope uses: {in_scope_uses}."
+                )
+
         if not confirm:
-            return {
+            plan: dict[str, Any] = {
                 "mode": "plan-only (nothing changed)",
                 "would_delete": {"id": current["id"], "name": current["name"]},
                 "next_step": "Call again with confirm=true to delete.",
             }
+            if in_scope_uses is not None:
+                plan["in_scope_uses"] = in_scope_uses
+            return plan
         await client.delete_tag(current["id"])
         return {"deleted": current["name"]}
 
@@ -335,6 +431,11 @@ def _binding_body(
     if binding_type == "IPAddress":
         if not ip_address_id:
             raise ValueError("binding_type 'IPAddress' requires ip_address_id.")
+        if port_id:
+            raise ValueError(
+                "binding_type 'IPAddress' does not take a port_id (it binds a service to "
+                "an IP with no specific port). Use binding_type 'Port' to bind to a port."
+            )
         return {"service_id": service_id, "type": "IPAddress",
                 "ip_address_id": ip_address_id}
     raise ValueError("binding_type must be 'Port' or 'IPAddress'.")
