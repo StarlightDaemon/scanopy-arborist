@@ -38,6 +38,7 @@ Check they exist: `podman secret ls`
 ## 2a. Install — rootful
 
 ```sh
+sudo mkdir -p /etc/containers/systemd   # not present by default on Fedora CoreOS
 sudo cp arborist.container /etc/containers/systemd/
 sudo systemctl daemon-reload
 sudo systemctl start arborist

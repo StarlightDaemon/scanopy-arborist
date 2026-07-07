@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 from urllib.parse import urlsplit
 
+import anyio
 import httpx
 import pytest
 
@@ -159,7 +160,15 @@ class RawScanopy:
         params: dict[str, Any] | None = None,
         json: Any = None,
     ) -> Any:
-        resp = await self.http.request(method, path, params=params, json=json)
+        # Retry 429s honoring Retry-After: the live limiter is shared across
+        # the whole suite (test_rate_limit_live deliberately exhausts it), and
+        # the raw fixture must not be brittle to that.
+        for _ in range(5):
+            resp = await self.http.request(method, path, params=params, json=json)
+            if resp.status_code != 429:
+                break
+            wait = resp.headers.get("Retry-After")
+            await anyio.sleep(float(wait) if wait and wait.replace(".", "").isdigit() else 1.0)
         body = resp.json()
         assert body.get("success") is True, (
             f"raw {method} {path} failed: HTTP {resp.status_code} {body}"

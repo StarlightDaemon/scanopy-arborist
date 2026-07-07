@@ -19,6 +19,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
+from . import __version__
 from .client import ScanopyClient
 from .config import Config, Profile, TlsPosture
 from .tools import ToolContext, register_tools
@@ -49,6 +50,9 @@ def build_mcp(cfg: Config, client: ScanopyClient, *, bind_host: str, bind_port: 
         stateless_http=True,
         transport_security=transport_security,
     )
+    # FastMCP 1.x doesn't expose a version parameter and defaults serverInfo
+    # .version to the SDK's own version; report Arborist's instead.
+    mcp._mcp_server.version = __version__
     register_tools(mcp, ToolContext(cfg=cfg, client=client))
     profile = cfg.profile.value
     logger.info(

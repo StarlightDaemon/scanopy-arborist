@@ -74,10 +74,11 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
 # Deliberate deviation from the usual `systemctl enable -q --now`: Arborist
-# refuses to start (by design — config guard, exit code 2) until the operator
-# fills SCANOPY_BASE_URL/SCANOPY_API_KEY in /opt/arborist/.env. Starting it
-# now would only leave a failed unit on first boot, so we enable it and let
-# the operator do the first start after configuring.
+# refuses to run until the operator fills SCANOPY_BASE_URL/SCANOPY_API_KEY in
+# /opt/arborist/.env (exit 5 "cannot reach Scanopy" with the placeholder URL,
+# exit 2 if the values are removed entirely). Starting it now would only
+# leave a failed unit on first boot, so we enable it and let the operator do
+# the first start after configuring.
 systemctl enable -q arborist
 msg_ok "Created Service"
 msg_ok "First start is manual: edit /opt/arborist/.env, then run 'systemctl restart arborist'"

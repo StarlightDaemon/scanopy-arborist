@@ -1,0 +1,36 @@
+# Disposable Scanopy for CI integration tests — server + postgres only.
+# The scan daemon is deliberately omitted: the integration suite creates its
+# own manual hosts and never depends on live discovery.
+# The server image is PINNED to the verified release; `latest` could drift
+# outside Arborist's version guard and fail CI for the wrong reason.
+name: scanopy-ci
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: scanopy
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ci-only-password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    image: ghcr.io/scanopy/scanopy/server:v0.17.3
+    ports:
+      - "127.0.0.1:60072:60072"
+    environment:
+      SCANOPY_LOG_LEVEL: info
+      SCANOPY_DATABASE_URL: postgresql://postgres:ci-only-password@postgres:5432/scanopy
+      SCANOPY_PUBLIC_URL: http://localhost:60072
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:60072/api/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
