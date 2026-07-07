@@ -153,10 +153,10 @@ def test_tag_usage_finds_cross_network_entities() -> None:
         by_id = {u["id"]: u for u in usage}
         assert set(by_id) == {"h1", "h2", "s1", "net-A"}
         # A network entity is its own scope.
-        assert by_id["net-A"]["network_id"] == "net-A"
-        assert by_id["h2"]["network_id"] == "net-B"
+        assert by_id["net-A"]["network_ids"] == ["net-A"]
+        assert by_id["h2"]["network_ids"] == ["net-B"]
         # No network filter was applied — both net-A and net-B entities show up.
-        out_of_A = [u for u in usage if u["network_id"] != "net-A"]
+        out_of_A = [u for u in usage if u["network_ids"] != ["net-A"]]
         assert {u["id"] for u in out_of_A} == {"h2", "s1"}
         await c.aclose()
 

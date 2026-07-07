@@ -46,9 +46,13 @@ async def test_set_host_tags_empty_actually_clears(cfg: Config, raw: RawScanopy)
             assert res.structuredContent["tag_ids"] == []
             fresh = await raw.data("GET", f"/api/v1/hosts/{host['id']}")
             assert fresh["tags"] == []
-            # cleanup tags
+            # cleanup via raw API: the scoped tool session refuses tag deletion
+            # by design (org-wide destructive op under a network scope).
+            all_tags = await raw.data("GET", "/api/v1/tags")
             for t in (t1, t2):
-                await s.call_tool("delete_tag", {"tag": t, "confirm": True})
+                for rec in all_tags:
+                    if rec["name"] == t:
+                        await raw.data("DELETE", f"/api/v1/tags/{rec['id']}")
     finally:
         await client.aclose()
 
@@ -148,10 +152,20 @@ async def test_bulk_plan_excludes_out_of_scope(env: dict[str, str], raw: RawScan
 # ------------------------------------- SC8: delete_tag fail-closed confinement
 
 
-async def test_delete_tag_fails_closed_on_out_of_scope_use(
+async def _delete_tag_raw(raw: RawScanopy, name: str) -> None:
+    for rec in await raw.data("GET", "/api/v1/tags"):
+        if rec["name"] == name:
+            await raw.data("DELETE", f"/api/v1/tags/{rec['id']}")
+
+
+async def test_delete_tag_always_refuses_under_scope(
     env: dict[str, str], raw: RawScanopy
 ) -> None:
-    # Create a tag and apply it to an in-network host, using an UNSCOPED session.
+    """Scoped tag deletion refuses unconditionally — even when every VISIBLE
+    use is inside the scope — because Scanopy also tags user API keys, which
+    are unreadable under API-key auth: no scan can prove the blast radius
+    stays in scope. (This replaced the visible-usage allow-path after two
+    incomplete enumeration-based fixes.)"""
     unscoped_cfg = Config.from_env({k: v for k, v in env.items()
                                     if k != "SCANOPY_NETWORK_ID"})
     host = await raw.create_host(unique_name("tagged"), ip=unique_ip())
@@ -166,51 +180,133 @@ async def test_delete_tag_fails_closed_on_out_of_scope_use(
     finally:
         await setup_client.aclose()
 
-    # A session scoped to a DIFFERENT network must refuse to delete it (the tag
-    # is applied to an out-of-scope host).
-    scoped_cfg = Config.from_env({**env, "SCANOPY_NETWORK_ID": BOGUS_NETWORK})
-    scoped_client, scoped_mcp = await _session(scoped_cfg)
     try:
-        async with create_connected_server_and_client_session(scoped_mcp._mcp_server) as s:
-            res = await s.call_tool("delete_tag", {"tag": tag_name, "confirm": True})
-            assert res.isError
-            assert "Refusing to delete tag" in res.content[0].text
-            assert "outside the configured network scope" in res.content[0].text
-        # Tag still exists.
+        # Scoped to a DIFFERENT network: refuse.
+        scoped_cfg = Config.from_env({**env, "SCANOPY_NETWORK_ID": BOGUS_NETWORK})
+        scoped_client, scoped_mcp = await _session(scoped_cfg)
+        try:
+            async with create_connected_server_and_client_session(
+                scoped_mcp._mcp_server
+            ) as s:
+                res = await s.call_tool("delete_tag", {"tag": tag_name, "confirm": True})
+                assert res.isError
+                assert "Refusing to delete tag" in res.content[0].text
+        finally:
+            await scoped_client.aclose()
+
+        # Scoped to the REAL network, tag used ONLY in scope: still refuse —
+        # user-API-key uses are unverifiable, so there is no provable-safe case.
+        inscope_cfg = Config.from_env({**env, "SCANOPY_NETWORK_ID": real_network})
+        inscope_client, inscope_mcp = await _session(inscope_cfg)
+        try:
+            async with create_connected_server_and_client_session(
+                inscope_mcp._mcp_server
+            ) as s:
+                res = await s.call_tool("delete_tag", {"tag": tag_name, "confirm": True})
+                assert res.isError
+                text = res.content[0].text
+                assert "Refusing to delete tag" in text
+                assert "user API keys" in text
+        finally:
+            await inscope_client.aclose()
+
+        # Tag survived both refusals.
         tags = await raw.data("GET", "/api/v1/tags")
         assert any(t["name"] == tag_name for t in tags)
+
+        # An UNSCOPED session deletes it fine (two-phase confirm still applies).
+        del_client, del_mcp = await _session(unscoped_cfg)
+        try:
+            async with create_connected_server_and_client_session(
+                del_mcp._mcp_server
+            ) as s:
+                plan = await s.call_tool("delete_tag", {"tag": tag_name})
+                assert not plan.isError, plan.content
+                assert plan.structuredContent["mode"].startswith("plan-only")
+                res = await s.call_tool("delete_tag", {"tag": tag_name, "confirm": True})
+                assert not res.isError, res.content
+                assert res.structuredContent["deleted"] == tag_name
+        finally:
+            await del_client.aclose()
     finally:
-        await scoped_client.aclose()
-
-    # A session scoped to the REAL network deletes it fine (only in-scope uses).
-    inscope_cfg = Config.from_env({**env, "SCANOPY_NETWORK_ID": real_network})
-    inscope_client, inscope_mcp = await _session(inscope_cfg)
-    try:
-        async with create_connected_server_and_client_session(inscope_mcp._mcp_server) as s:
-            res = await s.call_tool("delete_tag", {"tag": tag_name, "confirm": True})
-            assert not res.isError, res.content
-            assert res.structuredContent["deleted"] == tag_name
-    finally:
-        await inscope_client.aclose()
+        await _delete_tag_raw(raw, tag_name)
 
 
-async def test_create_and_update_tag_ignore_scope(
+async def test_create_tag_and_unused_update_proceed_under_scope(
     env: dict[str, str], raw: RawScanopy
 ) -> None:
-    # create_tag / update_tag don't touch entity associations, so they proceed
-    # regardless of scope (per the documented policy).
+    # create_tag touches no existing entity; update_tag on a tag with zero
+    # visible uses has nothing out of scope to protect. Both proceed.
     cfg = Config.from_env({**env, "SCANOPY_NETWORK_ID": BOGUS_NETWORK})
     client, mcp = await _session(cfg)
     name = unique_name("freetag")
+    newname = unique_name("renamed")
     try:
         async with create_connected_server_and_client_session(mcp._mcp_server) as s:
             res = await s.call_tool("create_tag", {"name": name})
             assert not res.isError, res.content
-            newname = unique_name("renamed")
             res = await s.call_tool("update_tag", {"tag": name, "name": newname})
             assert not res.isError, res.content
-            # delete has no out-of-scope uses (fresh tag on nothing) -> allowed.
+            # Deletion under scope refuses even for this never-used tag.
             res = await s.call_tool("delete_tag", {"tag": newname, "confirm": True})
-            assert not res.isError, res.content
+            assert res.isError
+            assert "Refusing to delete tag" in res.content[0].text
     finally:
         await client.aclose()
+        for candidate in (name, newname):
+            await _delete_tag_raw(raw, candidate)
+
+
+async def test_update_tag_fails_closed_on_out_of_scope_use(
+    env: dict[str, str], raw: RawScanopy
+) -> None:
+    """A tag in visible use outside the configured scope cannot be renamed or
+    restyled from a scoped session."""
+    unscoped_cfg = Config.from_env({k: v for k, v in env.items()
+                                    if k != "SCANOPY_NETWORK_ID"})
+    host = await raw.create_host(unique_name("upd-oos"), ip=unique_ip())
+    tag_name = unique_name("updtag")
+
+    setup_client, setup_mcp = await _session(unscoped_cfg)
+    try:
+        async with create_connected_server_and_client_session(setup_mcp._mcp_server) as s:
+            await s.call_tool("create_tag", {"name": tag_name})
+            await s.call_tool("set_host_tags", {"host": host["id"], "tags": [tag_name]})
+    finally:
+        await setup_client.aclose()
+
+    try:
+        scoped_cfg = Config.from_env({**env, "SCANOPY_NETWORK_ID": BOGUS_NETWORK})
+        scoped_client, scoped_mcp = await _session(scoped_cfg)
+        try:
+            async with create_connected_server_and_client_session(
+                scoped_mcp._mcp_server
+            ) as s:
+                res = await s.call_tool("update_tag", {"tag": tag_name, "name": "nope"})
+                assert res.isError
+                assert "Refusing to update tag" in res.content[0].text
+            # Unchanged.
+            tags = await raw.data("GET", "/api/v1/tags")
+            assert any(t["name"] == tag_name for t in tags)
+
+            # Scoped to the host's REAL network the same rename is fine: every
+            # visible use is in scope, and a rename is reversible (unlike delete).
+            inscope_cfg = Config.from_env(
+                {**env, "SCANOPY_NETWORK_ID": host["network_id"]}
+            )
+            in_client, in_mcp = await _session(inscope_cfg)
+            try:
+                async with create_connected_server_and_client_session(
+                    in_mcp._mcp_server
+                ) as s:
+                    res = await s.call_tool(
+                        "update_tag", {"tag": tag_name, "name": f"{tag_name}-ok"}
+                    )
+                    assert not res.isError, res.content
+            finally:
+                await in_client.aclose()
+        finally:
+            await scoped_client.aclose()
+    finally:
+        for candidate in (tag_name, f"{tag_name}-ok"):
+            await _delete_tag_raw(raw, candidate)

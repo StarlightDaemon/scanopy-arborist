@@ -473,38 +473,94 @@ class ScanopyClient:
     async def delete_tag(self, tag_id: str) -> None:
         await self._request("DELETE", f"/api/v1/tags/{tag_id}")
 
-    # Every taggable entity type that carries a network_id (so its scope can be
-    # checked). The Network entity is its own network. Used by tag_usage.
-    _TAG_USAGE_PATHS = {
-        "Host": "/api/v1/hosts",
-        "Service": "/api/v1/services",
-        "Subnet": "/api/v1/subnets",
-        "Dependency": "/api/v1/dependencies",
-        "Network": "/api/v1/networks",
+    # Tag-reach ground truth for Scanopy 0.17.3, derived EMPIRICALLY by probing
+    # PUT /api/v1/tags/assign with every resource type against a live instance
+    # (2026-07-07), then cross-checked against EntityDiscriminants::is_taggable
+    # in the Scanopy source. Ten types accept tag assignment:
+    #
+    #   enumerable under API-key auth (the nine below), plus
+    #   UserApiKey — whose list/GET endpoints (/api/v1/auth/keys) answer
+    #   403 "User context required" under API-key auth, so assignments to user
+    #   API keys are INVISIBLE to Arborist. tag_usage() therefore can never be
+    #   a complete census, which is why org-wide destructive tag operations
+    #   fail closed under a network scope instead of trusting this scan.
+    #
+    # tests/integration/test_tag_scope_canary.py re-derives both sets against
+    # the pinned Scanopy version and fails loudly if they drift from these
+    # constants. Do NOT extend by hand — re-run the canary/probe instead.
+    #
+    # Attribution kinds:
+    #   "network_id"  — record carries a scalar network_id
+    #   "self"        — the record IS a network; its own id is the attribution
+    #   "network_ids:<field>" — org-scoped record carrying a LIST of network
+    #       ids under <field>; an empty list means the record is attributable
+    #       to no network at all (treated as outside any scope — fail closed)
+    _TAG_USAGE_SOURCES: dict[str, tuple[str, str]] = {
+        "Host": ("/api/v1/hosts", "network_id"),
+        "Service": ("/api/v1/services", "network_id"),
+        "Subnet": ("/api/v1/subnets", "network_id"),
+        "Network": ("/api/v1/networks", "self"),
+        "Dependency": ("/api/v1/dependencies", "network_id"),
+        "Daemon": ("/api/v1/daemons", "network_id"),
+        "DaemonApiKey": ("/api/v1/auth/daemon", "network_id"),
+        "Discovery": ("/api/v1/discovery", "network_id"),
+        "Credential": ("/api/v1/credentials", "network_ids:assigned_network_ids"),
     }
 
-    async def tag_usage(self, tag_id: str) -> list[dict[str, Any]]:
-        """Every entity currently carrying ``tag_id``, across ALL networks the
-        API key can see (no network filter), as
-        ``{entity_type, id, name, network_id}``.
+    #: Taggable types whose assignments tag_usage() CANNOT see under API-key
+    #: auth (verified live: 403 on list and GET). Their existence is the reason
+    #: scoped tag deletion refuses outright rather than trusting the scan.
+    TAG_USAGE_BLIND_TYPES: tuple[str, ...] = ("UserApiKey",)
 
-        This deliberately does NOT apply SCANOPY_NETWORK_ID scoping — its whole
-        purpose is to reveal out-of-scope uses so a deletion can fail closed.
+    async def tag_usage(self, tag_id: str) -> list[dict[str, Any]]:
+        """Every VISIBLE entity currently carrying ``tag_id``, across ALL
+        networks the API key can see (no network filter), as
+        ``{entity_type, id, name, network_ids, org_scoped}`` where
+        ``network_ids`` is the record's full network attribution ([] when it
+        has none).
+
+        Deliberately does NOT apply SCANOPY_NETWORK_ID scoping — its purpose is
+        to reveal out-of-scope uses so mutations can fail closed. NOT a
+        complete census: types in TAG_USAGE_BLIND_TYPES are unreadable under
+        API-key auth and never appear here.
         """
         usage: list[dict[str, Any]] = []
-        for etype, path in self._TAG_USAGE_PATHS.items():
+        for etype, (path, kind) in self._TAG_USAGE_SOURCES.items():
             for e in await self._get_all(path):
-                if tag_id in (e.get("tags") or []):
-                    network_id = e["id"] if etype == "Network" else e.get("network_id")
-                    usage.append(
-                        {
-                            "entity_type": etype,
-                            "id": e["id"],
-                            "name": e.get("name"),
-                            "network_id": network_id,
-                        }
-                    )
+                if tag_id not in (e.get("tags") or []):
+                    continue
+                if kind == "self":
+                    nets = [e["id"]]
+                elif kind == "network_id":
+                    nets = [e["network_id"]] if e.get("network_id") else []
+                else:  # "network_ids:<field>"
+                    nets = list(e.get(kind.split(":", 1)[1]) or [])
+                usage.append(
+                    {
+                        "entity_type": etype,
+                        "id": e["id"],
+                        "name": e.get("name"),
+                        "network_ids": [str(n) for n in nets],
+                        "org_scoped": kind.startswith("network_ids:"),
+                    }
+                )
         return usage
+
+    def usage_outside_scope(self, usage: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """The subset of tag_usage() records not PROVABLY inside the configured
+        network scope. A record counts as outside when any of its network ids
+        differ from the scope, or when it has no network attribution at all
+        (org-scoped records with an empty list — fail closed on the unknown).
+        Returns [] when no scope is configured."""
+        nid = self._cfg.network_id
+        if not nid:
+            return []
+        outside: list[dict[str, Any]] = []
+        for u in usage:
+            nets = u.get("network_ids") or []
+            if not nets or set(nets) != {nid}:
+                outside.append(u)
+        return outside
 
     async def set_entity_tags(
         self, entity_type: str, entity_id: str, tag_ids: Sequence[str]

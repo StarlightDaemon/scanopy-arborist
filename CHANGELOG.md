@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Changed (scope-confinement audit, 2026-07-07)
+
+- **`delete_tag` now always refuses under `SCANOPY_NETWORK_ID`.** The previous
+  fail-closed design checked every entity the API key can see — but Scanopy
+  0.17.3 also accepts tags on user API keys, which are *unreadable* under
+  API-key auth (verified live: 403 "User context required" on
+  `/api/v1/auth/keys` while tag assignment to the same key succeeds). No scan
+  can prove an org-wide deletion stays inside a network scope, so scoped
+  sessions refuse outright; delete tags from an unscoped Arborist (two-phase
+  confirm unchanged) or the Scanopy UI. See `docs/scope-confinement-audit.md`.
+- **`update_tag` fails closed on out-of-scope use.** Renaming/restyling a tag
+  changes the label carried by every entity referencing it, so a scoped
+  session now scans visible usage and refuses if any use is outside (or not
+  attributable to) the configured network.
+- **`tag_usage` rebuilt from an empirical probe** of all Scanopy resource
+  types: scans all nine enumerable taggable types (was five — Daemon,
+  DaemonApiKey, Discovery, Credential were missing) with list-shaped network
+  attribution; org-scoped records with no network attribution classify as
+  out-of-scope (fail closed). A live canary test re-derives the taggable set
+  from the server and fails loudly if a Scanopy upgrade changes it.
+- `update_host_metadata` applies the network-scope check before its no-op
+  short-circuit (an out-of-scope host selected by UUID could previously have
+  its metadata echoed back by a no-op update).
+- Tag tool docstrings no longer claim deletion "removes the tag from every
+  entity": deletion soft-closes the tag row (label destroyed org-wide);
+  entity associations are left dangling (verified live).
+
 ### Fixed (second review pass)
 
 - **Tag-object scope confinement (fail-closed).** `delete_tag` now enumerates
