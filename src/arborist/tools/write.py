@@ -17,6 +17,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
+from ..client import _UNSET
 from ..redact import redact
 from . import ToolContext
 from .read import host_summary
@@ -27,7 +28,6 @@ _WRITE_DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True,
                                      openWorldHint=False)
 
 _TAGGABLE = {"Host", "Service", "Subnet", "Network", "Dependency"}
-_UNSET = object()
 
 
 def register(mcp: FastMCP, ctx: ToolContext) -> None:
@@ -67,6 +67,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         pass [] to clear. To add/remove one tag across many hosts use tag_entities /
         untag_entities instead."""
         record = await client.resolve_host(host)
+        client.assert_in_scope(record)
         tag_ids = [(await client.resolve_tag(t))["id"] for t in tags]
         await client.set_entity_tags("Host", record["id"], tag_ids)
         refreshed = await client.get_host(record["id"])
@@ -87,6 +88,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         resolved: list[tuple[dict[str, Any], dict[str, Any]]] = []
 
         for u in updates:
+            # JSON nulls for name/hidden are not valid values; drop them so the
+            # plan and the apply phase agree (apply treats None as "no change").
+            u = {k: v for k, v in u.items() if not (k in ("name", "hidden") and v is None)}
             sel = str(u.get("host", ""))
             try:
                 record = await client.resolve_host(sel)
@@ -189,6 +193,41 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         await client.delete_tag(current["id"])
         return {"deleted": current["name"]}
 
+    async def _assert_entities_in_scope(entity_type: str, entity_ids: list[str]) -> None:
+        """SCANOPY_NETWORK_ID confinement for bulk tag targets. UUID lookups are
+        not network-filtered server-side, so each network-scoped entity must be
+        fetched and checked before we touch it."""
+        if not ctx.cfg.network_id:
+            return
+        if entity_type == "Network":
+            for eid in entity_ids:
+                if eid != ctx.cfg.network_id:
+                    raise ValueError(
+                        f"Network {eid} is outside the configured scope "
+                        f"({ctx.cfg.network_id}). Refusing to modify it."
+                    )
+            return
+        if entity_type == "Host":
+            for eid in entity_ids:
+                client.assert_in_scope(await client.get_host(eid))
+            return
+        if entity_type == "Service":
+            for eid in entity_ids:
+                client.assert_in_scope(await client.get_service(eid), kind="Service")
+            return
+        # Subnet / Dependency: no single-GET needed — scan the scoped list.
+        listing = (
+            await client.list_subnets() if entity_type == "Subnet"
+            else await client.list_dependencies()
+        )
+        in_scope = {str(e["id"]) for e in listing}
+        for eid in entity_ids:
+            if eid not in in_scope:
+                raise ValueError(
+                    f"{entity_type} {eid} is not in the configured network scope "
+                    f"({ctx.cfg.network_id}). Refusing to modify it."
+                )
+
     @mcp.tool(annotations=_WRITE_SAFE)
     async def tag_entities(
         tag: str, entity_ids: list[str], entity_type: str = "Host"
@@ -196,6 +235,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         """Add one tag to many entities at once. entity_type: Host, Service, Subnet,
         Network, or Dependency. entity_ids must be ids (use list_hosts/list_services)."""
         _check_entity_type(entity_type)
+        await _assert_entities_in_scope(entity_type, entity_ids)
         t = await client.resolve_tag(tag)
         result = await client.bulk_tag(t["id"], entity_type, entity_ids)
         return redact({"tag": t["name"], "result": result})
@@ -206,6 +246,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     ) -> dict[str, Any]:
         """Remove one tag from many entities at once (same shape as tag_entities)."""
         _check_entity_type(entity_type)
+        await _assert_entities_in_scope(entity_type, entity_ids)
         t = await client.resolve_tag(tag)
         result = await client.bulk_tag(t["id"], entity_type, entity_ids, remove=True)
         return redact({"tag": t["name"], "result": result})
@@ -255,6 +296,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     ) -> dict[str, Any]:
         """Update an existing binding (same fields and 409 conflict rules as
         create_binding)."""
+        existing = await client.get_binding(binding_id)
+        client.assert_in_scope(existing, kind="Binding")
         body = await _binding_body_for(service_id, binding_type, port_id, ip_address_id)
         updated = await client.update_binding(binding_id, body)
         return redact({"updated": updated})
@@ -262,12 +305,14 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(annotations=_WRITE_DESTRUCTIVE)
     async def delete_binding(binding_id: str, confirm: bool = False) -> dict[str, Any]:
         """Delete a binding by id. Requires confirm=true."""
+        existing = await client.get_binding(binding_id)
+        client.assert_in_scope(existing, kind="Binding")
         if not confirm:
-            return {
+            return redact({
                 "mode": "plan-only (nothing changed)",
-                "would_delete": binding_id,
+                "would_delete": existing,
                 "next_step": "Call again with confirm=true to delete.",
-            }
+            })
         await client.delete_binding(binding_id)
         return {"deleted": binding_id}
 

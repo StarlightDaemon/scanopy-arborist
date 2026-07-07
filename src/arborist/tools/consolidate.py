@@ -39,6 +39,10 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         cannot be merged away (merge the other host into it instead)."""
         dest = await client.resolve_host(destination)
         src = await client.resolve_host(source)
+        # Scope confinement before even the preview: UUID resolution is not
+        # network-filtered, and this is the one tool that deletes a record.
+        client.assert_in_scope(dest)
+        client.assert_in_scope(src)
 
         preview = {
             "destination": host_summary(dest),

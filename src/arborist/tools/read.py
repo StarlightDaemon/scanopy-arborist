@@ -141,10 +141,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         tag_ids = None
         if tag:
             tag_ids = [(await client.resolve_tag(tag))["id"]]
-        hosts = await client.list_hosts(
-            network_id=network_id, tag_ids=tag_ids, limit=_limit(limit), offset=offset
-        )
         if search:
+            # Substring search must see every host, not one server-side page —
+            # scan all pages, filter, then paginate the filtered result.
             needle = search.lower()
 
             def hit(h: dict[str, Any]) -> bool:
@@ -156,7 +155,20 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
                     needle in (ip.get("ip_address") or "") for ip in h.get("ip_addresses", [])
                 )
 
-            hosts = [h for h in hosts if hit(h)]
+            matched = [
+                h for h in await client.list_all_hosts(network_id=network_id, tag_ids=tag_ids)
+                if hit(h)
+            ]
+            page = matched[offset:offset + _limit(limit)]
+            return redact({
+                "count": len(page),
+                "total_matches": len(matched),
+                "offset": offset,
+                "hosts": [host_summary(h) for h in page],
+            })
+        hosts = await client.list_hosts(
+            network_id=network_id, tag_ids=tag_ids, limit=_limit(limit), offset=offset
+        )
         return redact({
             "count": len(hosts),
             "offset": offset,

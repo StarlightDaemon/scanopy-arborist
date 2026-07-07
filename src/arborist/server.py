@@ -64,9 +64,21 @@ def _transport_security(
     cfg: Config, bind_host: str, bind_port: int
 ) -> TransportSecuritySettings | None:
     if not cfg.allowed_hosts:
-        # Loopback binds get the SDK's built-in localhost-only defaults; §5.5
-        # validation guarantees non-loopback binds always have allowed_hosts.
-        return None
+        # §5.5 validation guarantees non-loopback binds always have
+        # allowed_hosts, so this branch is loopback-only. Build the localhost
+        # allowlist explicitly rather than relying on FastMCP's auto-default,
+        # which only fires for the exact hosts 127.0.0.1/localhost/::1 and
+        # would silently DISABLE rebinding protection for e.g. 127.0.0.2.
+        hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+        origins = ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]
+        if bind_host not in ("127.0.0.1", "localhost", "::1"):
+            hosts.append(f"{bind_host}:*")
+            origins.extend([f"http://{bind_host}:*", f"https://{bind_host}:*"])
+        return TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=hosts,
+            allowed_origins=origins,
+        )
     hosts: list[str] = []
     origins: list[str] = []
     for entry in cfg.allowed_hosts:

@@ -38,7 +38,7 @@ _UNSET = object()
 _MAX_RETRIES = 3
 _MAX_RETRY_WAIT_S = 30.0
 _PAGE_SIZE = 200
-_RESOLVE_SCAN_CAP = 2000
+_SCAN_CEILING = 50_000
 
 
 class AmbiguousSelectorError(ArboristError):
@@ -53,8 +53,19 @@ def _is_uuid(value: str) -> bool:
         return False
 
 
+_MAC_SHAPE = re.compile(
+    r"^[0-9A-Fa-f]{2}([:.\-]?[0-9A-Fa-f]{2}){5}$"
+)
+
+
 def _norm_mac(value: str) -> str:
     return re.sub(r"[^0-9a-f]", "", value.lower())
+
+
+def _looks_like_mac(value: str) -> bool:
+    """Only selectors shaped like a MAC participate in MAC matching — stripping
+    arbitrary strings down to their hex residue produces false positives."""
+    return bool(_MAC_SHAPE.match(value.strip()))
 
 
 def clamp_limit(limit: int | None, default: int = 100) -> int:
@@ -154,17 +165,25 @@ class ScanopyClient:
         return data if isinstance(data, list) else []
 
     async def _get_all(
-        self, path: str, *, params: dict[str, Any] | None = None, cap: int = _RESOLVE_SCAN_CAP,
+        self, path: str, *, params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
+        """Fetch every page. A silent cap here would make resolution and scans
+        wrong on large instances, so instead of truncating we fail loudly at an
+        absurd ceiling (misconfiguration / runaway pagination guard)."""
         items: list[dict[str, Any]] = []
         offset = 0
-        while len(items) < cap:
+        while True:
             page = await self._get_page(path, params=params, limit=_PAGE_SIZE, offset=offset)
             items.extend(page)
             if len(page) < _PAGE_SIZE:
-                break
+                return items
+            if len(items) >= _SCAN_CEILING:
+                raise ArboristError(
+                    f"Scan of {path} exceeded {_SCAN_CEILING} records without finishing; "
+                    "refusing to continue. Narrow the query (network_id, tag filters) "
+                    "instead of scanning the whole instance."
+                )
             offset += _PAGE_SIZE
-        return items[:cap]
 
     def _network_params(self, network_id: str | None = None) -> dict[str, Any]:
         nid = network_id or self._cfg.network_id
@@ -205,6 +224,16 @@ class ScanopyClient:
 
     async def get_host(self, host_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/api/v1/hosts/{host_id}")
+
+    async def list_all_hosts(
+        self, *, network_id: str | None = None, tag_ids: Sequence[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Every host (all pages) — for client-side filtering like substring search,
+        which must never be applied to a single server-side page."""
+        params = self._network_params(network_id)
+        if tag_ids:
+            params["tag_ids"] = ",".join(tag_ids)
+        return await self._get_all("/api/v1/hosts", params=params)
 
     async def get_service(self, service_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/api/v1/services/{service_id}")
@@ -273,6 +302,10 @@ class ScanopyClient:
         still produces useful candidates instead of a bare 404.
         """
         s = selector.strip()
+        if not s:
+            raise ArboristError(
+                "Host selector must not be empty; pass an id, name, hostname, IP, or MAC."
+            )
         attempted: list[str] = []
 
         if _is_uuid(s):
@@ -288,17 +321,18 @@ class ScanopyClient:
         attempted.extend(["name", "hostname", "ip", "mac"])
 
         lowered = s.lower()
-        mac = _norm_mac(s)
+        mac = _norm_mac(s) if _looks_like_mac(s) else ""
 
         def matches(h: dict[str, Any]) -> bool:
             if str(h.get("name", "")).lower() == lowered:
                 return True
-            if (h.get("hostname") or "").lower() == lowered:
+            hostname = (h.get("hostname") or "").lower()
+            if hostname and hostname == lowered:
                 return True
             for ip in h.get("ip_addresses", []):
                 if ip.get("ip_address") == s:
                     return True
-                if mac and len(mac) == 12 and _norm_mac(ip.get("mac_address") or "") == mac:
+                if mac and _norm_mac(ip.get("mac_address") or "") == mac:
                     return True
             return False
 
@@ -321,15 +355,20 @@ class ScanopyClient:
 
     # ---------------------------------------------------------------- writes
 
-    def _assert_in_scope(self, host: dict[str, Any]) -> None:
-        """SCANOPY_NETWORK_ID, when set, confines writes to that network."""
+    def assert_in_scope(self, record: dict[str, Any], *, kind: str = "Host") -> None:
+        """SCANOPY_NETWORK_ID, when set, confines writes to that network.
+
+        Every write tool must funnel through this for any record it resolved —
+        UUID lookups are not network-filtered server-side, so this client-side
+        check is the only scope enforcement that exists."""
         nid = self._cfg.network_id
-        if nid and str(host.get("network_id")) != nid:
+        if nid and str(record.get("network_id")) != nid:
             raise ArboristError(
-                f"Host '{host.get('name')}' ({host.get('id')}) belongs to network "
-                f"{host.get('network_id')}, but Arborist is scoped to network {nid} "
-                "(SCANOPY_NETWORK_ID). Refusing to modify it."
+                f"{kind} '{record.get('name', record.get('id'))}' ({record.get('id')}) belongs "
+                f"to network {record.get('network_id')}, but Arborist is scoped to network "
+                f"{nid} (SCANOPY_NETWORK_ID). Refusing to modify it."
             )
+
 
     async def update_host_curated(
         self,
@@ -353,7 +392,7 @@ class ScanopyClient:
           change (e.g. a scan) surfaces as a conflict instead of a lost update.
         """
         current = await self.get_host(host_id)
-        self._assert_in_scope(current)
+        self.assert_in_scope(current)
 
         payload: dict[str, Any] = {
             "id": current["id"],
@@ -466,6 +505,9 @@ class ScanopyClient:
         raise AmbiguousSelectorError(f"Tag name '{selector}' matched {len(matches)} tags.")
 
     # Bindings ---------------------------------------------------------------
+
+    async def get_binding(self, binding_id: str) -> dict[str, Any]:
+        return await self._request("GET", f"/api/v1/bindings/{binding_id}")
 
     async def create_binding(self, body: dict[str, Any]) -> dict[str, Any]:
         return await self._request("POST", "/api/v1/bindings", json_body=body)

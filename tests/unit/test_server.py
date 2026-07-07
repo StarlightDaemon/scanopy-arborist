@@ -143,8 +143,14 @@ class TestProfileGating:
 
 
 class TestTransportSecuritySettings:
-    def test_no_allowed_hosts_uses_sdk_defaults(self, make_config):
-        assert _transport_security(make_config(), "127.0.0.1", 60074) is None
+    def test_no_allowed_hosts_gets_explicit_loopback_allowlist(self, make_config):
+        # Explicit settings, not None: FastMCP's auto-default only covers the
+        # exact hosts 127.0.0.1/localhost/::1, so None would silently disable
+        # rebinding protection for other loopback binds (see test_review_fixes).
+        settings = _transport_security(make_config(), "127.0.0.1", 60074)
+        assert settings is not None
+        assert settings.enable_dns_rebinding_protection
+        assert "127.0.0.1:*" in settings.allowed_hosts
 
     def test_allowed_hosts_expand_ports_and_origins(self, make_config):
         cfg = make_config(ARBORIST_ALLOWED_HOSTS="arborist.lan:60074,plain")
