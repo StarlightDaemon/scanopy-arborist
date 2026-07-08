@@ -1,10 +1,10 @@
 {
-  "installed_edict_version": "1.0.0",
-  "installed_at": "2026-07-08T07:01:11+00:00",
+  "installed_edict_version": "1.0.1",
+  "installed_at": "2026-07-08T07:52:24.572559+00:00",
   "managed_files": [
     {
       "path": "README.md",
-      "hash": "1103963b0973603701de8c196fc5f9afa9f6d869c9cd6a04c12539166bc736bc"
+      "hash": "9465f501f11fce972d3952cc2ba3e9d19917518f5af6fb4347db27ee66155216"
     },
     {
       "path": "OPERATING_RULES.md",
@@ -30,7 +30,7 @@
   "hook_files": [
     {
       "path": "hooks/commit-msg",
-      "hash": "92e657422c4be1f690efcd5b62f377b961f3645c7fb340b50091ca2b25460f47"
+      "hash": "6588102c21e534d202afc522f057c839143486239a9d436e384ea697c9c13556"
     }
   ]
 }

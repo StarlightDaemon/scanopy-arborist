@@ -1,7 +1,7 @@
 {
   "instance_schema_version": "1",
   "instance_form_type": "raiden-instance",
-  "installed_edict_version": "1.0.0",
+  "installed_edict_version": "1.0.1",
   "managed_roots": [
     ".raiden/writ"
   ],

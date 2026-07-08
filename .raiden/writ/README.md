@@ -1,6 +1,6 @@
 # Writ Managed Core
 
-This is the installed managed-core payload of the Edict package (v1.0.0).
+This is the installed managed-core payload of the Edict package (v1.0.1).
 
 In a downstream RAIDEN Instance it installs to `.raiden/writ/`. Every file here
 is RAIDEN-managed core: authored centrally, versioned and hash-tracked as one
