@@ -19,3 +19,12 @@
   instance. Logged as LOOP-002; bounded-task prompt written to
   `.raiden/local/prompts/ci-integration-canary-gap.md` for a future agent
   session to resolve.
+- LOOP-002 resolved same day (commit `66fbc60`): bootstrapped the CI fixture
+  locally (alternate port, to avoid colliding with a second live Scanopy
+  instance already running) and probed the API directly rather than
+  guessing. Service and DaemonApiKey are genuinely seedable and now are;
+  Daemon and Discovery are structurally impossible without a live scan
+  daemon (`POST /api/v1/daemons` is 405; `POST /api/v1/discovery` requires a
+  `daemon_id` that fails existence-check for any non-connected daemon) and
+  are now a documented, explicit exception in the canary test rather than a
+  failure. CI run `28930282010` green on `main`.
