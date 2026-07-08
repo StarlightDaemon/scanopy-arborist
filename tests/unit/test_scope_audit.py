@@ -17,8 +17,7 @@ tests/integration/test_tag_scope_canary.py.
 
 from __future__ import annotations
 
-import json
-from typing import Any, Callable
+from typing import Any
 
 import anyio
 import httpx
