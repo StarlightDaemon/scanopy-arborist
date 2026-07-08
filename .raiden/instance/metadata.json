@@ -1,0 +1,14 @@
+{
+  "instance_schema_version": "1",
+  "instance_form_type": "raiden-instance",
+  "installed_edict_version": "1.0.0",
+  "managed_roots": [
+    ".raiden/writ"
+  ],
+  "overlay_roots": [
+    ".raiden/local"
+  ],
+  "live_state_roots": [
+    ".raiden/state"
+  ]
+}

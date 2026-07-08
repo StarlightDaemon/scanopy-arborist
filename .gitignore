@@ -8,3 +8,8 @@ dist/
 .env
 .env.*
 !.env.example
+
+# RAIDEN — public-instance audit exclusions
+audit-reports/
+.raiden/state/AUDIT_LOG.md
+.raiden/state/last-audit.md
