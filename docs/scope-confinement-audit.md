@@ -130,7 +130,7 @@ the audit read line-by-line; **canary** = pinned by the canary test.
 | `set_host_tags` | 1 Host + tag associations on it | clear-path bulk-removes only from that host | `assert_in_scope(record)`; tag resolution is read-only | bounded | PASS |
 | `bulk_update_hosts` | N Hosts | — | per-record `assert_in_scope` in plan AND apply; out-of-scope rows excluded from plan output | bounded | PASS |
 | `create_tag` | new org-wide Tag object | none (no associations yet) | policy: creation allowed (§2) | probe+policy | PASS |
-| `update_tag` | org-wide Tag object | label change visible on every entity referencing it (10 types incl. blind) | **NEW:** visible-usage scan via `tag_usage`; refuses on any out-of-scope/unattributable use (F3) | probe+canary | **FIXED** (F3) |
+| `update_tag` | org-wide Tag object | label change visible on every entity referencing it (10 types incl. blind) | **NEW:** visible-usage scan via `tag_usage`; refuses on any out-of-scope/unattributable *visible* use (F3) | probe+canary | **PARTIAL — see F5.** More restrictive than before, but a tag whose only use is on a `UserApiKey` (invisible under API-key auth) still passes the guard. Handed back to the operator under Stop Condition 11. |
 | `delete_tag` | org-wide Tag object | label destroyed for every referencing entity, incl. types invisible to API-key auth | **NEW:** unconditional refusal under scope (F2); unscoped: two-phase confirm + visible-usage plan | probe+canary | **FIXED** (F2) |
 | `tag_entities` | ≤5 entity types (`_TAGGABLE`), N entities | — | client-side type gate (deliberately narrower than server's 10 — infrastructure types are out of charter); per-type scope checks in `_assert_entities_in_scope`; canary asserts `_TAGGABLE ⊆ _TAG_USAGE_SOURCES ⊆ server-taggable` | probe+canary | PASS |
 | `untag_entities` | same as `tag_entities` | — | same gates | probe+canary | PASS |
@@ -168,11 +168,48 @@ design — the no-op short-circuit — is F1, fixed.
 | F2 | `delete_tag`'s allow-path depended on an enumeration that is provably incompletable (UserApiKey blind spot) — the root cause of SC8 #1 and #2 | high | unconditional scoped refusal (§2); refusal message reports visible usage census + the blind-spot rationale |
 | F3 | `update_tag` mutated the org-wide label with **no** usage check at all | medium | visible-usage fail-closed check (refuses on out-of-scope or unattributable use) |
 | F4 | `tag_usage` scanned 5 of 9 enumerable taggable types; attribution model couldn't represent list-shaped (org-scoped) records | high (enabler of F2) | rebuilt from probe: 9 sources, list-shaped attribution, `usage_outside_scope` fail-closed classifier, canary |
+| F5 | **`update_tag`'s visible-usage guard is incomplete — the same UserApiKey blind spot that forced `delete_tag` to refuse outright.** A scoped session can rename/restyle a tag whose only use is on an out-of-scope `UserApiKey`. | medium (reversible, label-only) — but same **bug class** as SC8 | **NOT FIXED — Stop Condition 11.** This is the third occurrence of an incomplete tag-scope fix; per the run's charter the design is handed back to the operator rather than auto-patched a fourth time (see §6 below). |
 
-No critical scope-confinement gap was found in any non-tag write tool
-(stop-condition 10 not triggered: F1 was already known from the prior pass's
-review and carried forward, not newly surfaced; F3 is moderate — reversible,
-label-only blast radius).
+### F5 — Stop Condition 11 (tag-scope fix still incomplete, third occurrence)
+
+The review gate's tag-escape lens found, and this session independently
+reproduced live, that `update_tag` inherits the exact blind spot §2 uses to
+justify `delete_tag`'s unconditional refusal. Reproduction
+(`scratchpad/verify_updatetag_hole.py`): with `SCANOPY_NETWORK_ID` set, a tag
+assigned **only** to a `UserApiKey` produces `tag_usage() == []` and
+`usage_outside_scope([]) == []`, so the guard passes and the real `update_tag`
+MCP tool committed a color change org-wide on that out-of-scope key.
+
+Per the run charter (Stop Condition 11: *a third occurrence of an incomplete
+tag-scope fix, found by this run's own review gate → halt; hand the design
+back rather than attempt a fourth automatic fix*), **this is not auto-fixed.**
+The committed state is still a strict improvement — before this pass
+`update_tag` had **no** scope check at all — so it is safe to leave in place
+while the operator decides the design. Candidate designs (operator's call):
+
+1. **Extend `delete_tag`'s unconditional scoped refusal to `update_tag`**
+   (smallest change, consistent with the policy already shipped; the
+   recommendation if a same-class fix is authorized).
+2. **Accept the residual** as documented, low-severity, reversible behavior
+   (label-only, does not alter the key's permissions/networks).
+3. **Session-auth escalation** — give Arborist user-session credentials so it
+   can read `/api/v1/auth/keys` and obtain a complete usage census (larger
+   change to the credential model).
+4. **Narrow Arborist's tag surface** so tag mutations never consider
+   org-scoped/blind types.
+
+Root cause is structural to Scanopy 0.17.3: tags can be assigned to entities
+an API key cannot read back, so **no** usage scan performed with an API key is
+ever complete — any tag operation that reasons about "where is this tag used"
+is working from an inherently partial picture. That is why the durable answer
+for *destructive* org-wide ops was "refuse under scope," and why the same
+question for *mutating* ops is a genuine design decision rather than a
+mechanical patch.
+
+**Stop-condition 10 was not triggered:** no critical scope gap was found in a
+non-tag write tool. F1 was already known from the prior pass and carried
+forward; the bindings referential note (N1) is a data-quality wart, not a
+scope escape. F5 is squarely the tag-scope bug class (SC11), not SC10.
 
 ## 5. Test evidence
 
@@ -182,5 +219,13 @@ label-only blast radius).
 - `tests/integration/test_tag_scope_canary.py` — live drift canary (above).
 - `tests/integration/test_fix_pass_live.py` — scoped delete refuses in ALL
   scope configurations incl. "everything visibly in scope"; unscoped
-  delete works; scoped update refuses on out-of-scope use and proceeds
-  when in scope. (29 integration tests green vs. live 0.17.3.)
+  delete works; scoped update refuses on out-of-scope *visible* use and
+  proceeds when in scope. (29 integration tests green vs. live 0.17.3.)
+- `scratchpad/verify_updatetag_hole.py` — the F5 reproduction (not committed;
+  session-scratchpad evidence for the operator hand-back).
+
+> **Note on test coverage vs. F5:** the current tests assert `update_tag`'s
+> *visible-usage* fail-closed behavior, which passes. They do **not** yet
+> cover the UserApiKey blind-usage case (that would require a test that the
+> current code fails — appropriate to add alongside whichever design the
+> operator picks, not before).

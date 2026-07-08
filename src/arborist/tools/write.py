@@ -262,6 +262,13 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         if the tag is visibly in use on any entity outside the configured network, or
         on any entity that cannot be attributed to a network — changing a label that
         out-of-scope entities carry modifies them in effect, if not in storage."""
+        # KNOWN LIMITATION (F5 / Stop Condition 11, docs/scope-confinement-audit.md):
+        # this guard only sees VISIBLE usage. Scanopy 0.17.3 accepts tags on
+        # UserApiKeys, which /api/v1/auth/keys will not return under API-key auth
+        # (403), so a tag whose only use is on an out-of-scope UserApiKey passes
+        # this check. delete_tag refuses unconditionally under scope for exactly
+        # this reason; whether update_tag should do the same is a design decision
+        # deliberately left to a maintainer rather than auto-patched a fourth time.
         current = await client.resolve_tag(tag)
         patch: dict[str, Any] = {}
         if name is not None:

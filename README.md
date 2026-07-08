@@ -27,7 +27,11 @@ Host updates go through a read-modify-write path that echoes discovered fields b
 
 When `SCANOPY_NETWORK_ID` is set, Arborist refuses to *modify* anything outside that network. For network-scoped entities (hosts, services, subnets, bindings, …) it verifies the resolved entity's `network_id` before every write — including when you address it by a raw UUID, which Scanopy does not network-filter server-side.
 
-Some Scanopy resources are **organization-scoped, not network-scoped** — a tag, for example, has no `network_id` of its own. For those, confinement means checking the network-scoped *entities the operation actually touches*, and **failing closed** if any fall outside the configured scope. Concretely: `delete_tag` refuses when the tag is applied to any out-of-scope entity (deleting a tag strips it org-wide), while `create_tag`/`update_tag` — which don't touch entity associations — proceed. This is the general rule for any org-scoped-but-not-network-scoped resource; anything similar added later (e.g. Groups, were it ever built) inherits it.
+Some Scanopy resources are **organization-scoped, not network-scoped** — a tag, for example, has no `network_id` of its own. For those, confinement is decided by the operation's *reach*, tiered by severity (full analysis: `docs/scope-confinement-audit.md`):
+
+- **Create** (`create_tag`) touches no existing entity and proceeds.
+- **Mutate** (`update_tag`) changes the shared label everywhere the tag is referenced, so a scoped session scans every *visible* use and refuses if any falls outside — or cannot be attributed to — the configured network.
+- **Destroy** (`delete_tag`) is **always refused under a network scope.** Scanopy also accepts tags on user API keys, which an API key cannot read back (verified live: 403 on `/api/v1/auth/keys`), so no scan can prove an org-wide deletion stays in scope. Delete tags from an unscoped Arborist (the two-phase `confirm` flow still applies) or the Scanopy UI. A live canary test re-derives Scanopy's taggable-entity set on every integration run and fails loudly if it drifts from what these checks assume.
 
 ## Supported Scanopy versions
 
@@ -113,7 +117,7 @@ All configuration is via environment variables. `SCANOPY_*` describes the target
 |---|---|---|---|
 | `SCANOPY_BASE_URL` | *(required)* | both | Scanopy URL, e.g. `http://scanopy.lan:60072`. Must start with `http://` or `https://`. |
 | `SCANOPY_API_KEY` | *(required)* | both | Scanopy user API key (`scp_u_...`), Platform > API Keys. |
-| `SCANOPY_NETWORK_ID` | unset | both | Pin Arborist to one Scanopy network: list tools default to it, and writes to entities outside it are refused (org-scoped resources like tags fail closed against their out-of-scope uses — see "Network-scope confinement"). |
+| `SCANOPY_NETWORK_ID` | unset | both | Pin Arborist to one Scanopy network: list tools default to it, and writes to entities outside it are refused. Org-scoped resources are tiered — tag creation proceeds, tag updates fail closed on visible out-of-scope use, tag deletion is always refused (see "Network-scope confinement"). |
 | `SCANOPY_TLS_VERIFY` | `true` | both | Verify Scanopy's TLS certificate. |
 | `SCANOPY_TLS_CA_PATH` | unset | both | Custom CA bundle for verifying Scanopy. Mutually exclusive with `SCANOPY_TLS_VERIFY=false`. |
 | `ARBORIST_PROFILE` | `readonly` | both | `readonly` or `readwrite`. Gates which tools are registered at all. |
@@ -184,7 +188,7 @@ Profile gating is structural: tools outside the active profile are **never regis
 | `bulk_update_hosts` | Metadata updates across many hosts — two-phase (plan, then `confirm=true`). |
 | `create_tag` | Create a tag (color, `is_application`). Requires an Admin-level key. |
 | `update_tag` | Rename or restyle an existing tag. |
-| `delete_tag` | Delete a tag from every entity carrying it. Requires `confirm=true`. |
+| `delete_tag` | Delete a tag — the label disappears org-wide. Requires `confirm=true`; always refused when `SCANOPY_NETWORK_ID` is set (see "Network-scope confinement"). |
 | `tag_entities` | Add one tag to many hosts/services/subnets/networks/dependencies. |
 | `untag_entities` | Remove one tag from many entities. |
 | `create_binding` | Bind a service to a port or IP on its host. |
