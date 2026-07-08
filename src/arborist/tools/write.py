@@ -258,18 +258,32 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         change. The tag keeps its id, so entity assignments are unaffected — but the
         label changes everywhere the tag is used, org-wide.
 
-        Scope safety: when SCANOPY_NETWORK_ID is configured this refuses (fail-closed)
-        if the tag is visibly in use on any entity outside the configured network, or
-        on any entity that cannot be attributed to a network — changing a label that
-        out-of-scope entities carry modifies them in effect, if not in storage."""
-        # KNOWN LIMITATION (F5 / Stop Condition 11, docs/scope-confinement-audit.md):
-        # this guard only sees VISIBLE usage. Scanopy 0.17.3 accepts tags on
-        # UserApiKeys, which /api/v1/auth/keys will not return under API-key auth
-        # (403), so a tag whose only use is on an out-of-scope UserApiKey passes
-        # this check. delete_tag refuses unconditionally under scope for exactly
-        # this reason; whether update_tag should do the same is a design decision
-        # deliberately left to a maintainer rather than auto-patched a fourth time.
+        Scope safety: when SCANOPY_NETWORK_ID is configured this ALWAYS refuses
+        (fail-closed), the same unconditional policy as delete_tag. A tag's label is
+        shared by every entity carrying it on any network, and that set can never be
+        fully enumerated under API-key auth — Scanopy accepts tags on user API keys,
+        which are unreadable with an API key — so a network-scoped Arborist can never
+        prove a relabel stays inside its scope. The refusal deliberately does NOT
+        consult tag_usage(): a usage-conditional check looks thorough but has a
+        permanent blind spot (this is exactly what F5 / Stop Condition 11 was). Rename
+        or restyle tags from an unscoped Arborist (no SCANOPY_NETWORK_ID) or the
+        Scanopy UI instead."""
         current = await client.resolve_tag(tag)
+
+        # Unconditional under a configured scope — mirrors delete_tag. No tag_usage()
+        # call gates this decision; the whole point is that usage can't be proven
+        # complete, so the refusal must not depend on it.
+        if ctx.cfg.network_id:
+            raise ArboristError(
+                f"Refusing to update tag '{current['name']}': Arborist is scoped to "
+                f"network {ctx.cfg.network_id} (SCANOPY_NETWORK_ID) and a tag's label "
+                "is shared org-wide — renaming or restyling it changes the label on "
+                "every entity carrying it, across every network. That set cannot be "
+                "verified under API-key auth (tags on user API keys are unreadable), so "
+                "a scoped Arborist cannot prove the change stays in scope. Update tags "
+                "from an unscoped Arborist or the Scanopy UI."
+            )
+
         patch: dict[str, Any] = {}
         if name is not None:
             patch["name"] = name
@@ -281,21 +295,6 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             patch["is_application"] = is_application
         if not patch:
             return {"unchanged": current["name"]}
-        if ctx.cfg.network_id:
-            usage = await client.tag_usage(current["id"])
-            outside = client.usage_outside_scope(usage)
-            if outside:
-                sample = ", ".join(
-                    f"{u['entity_type']} '{u.get('name') or u['id']}'" for u in outside[:5]
-                )
-                raise ArboristError(
-                    f"Refusing to update tag '{current['name']}': it is in use on "
-                    f"{len(outside)} entit{'y' if len(outside) == 1 else 'ies'} outside "
-                    f"(or not attributable to) the configured network scope "
-                    f"({ctx.cfg.network_id}), e.g. {sample}. Renaming or restyling it "
-                    "would change the label those out-of-scope entities carry. "
-                    f"In-scope uses: {len(usage) - len(outside)}."
-                )
         updated = await client.update_tag(current["id"], patch)
         return redact({"updated": {"id": updated["id"], "name": updated["name"],
                                    "color": updated.get("color")}})

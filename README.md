@@ -30,8 +30,7 @@ When `SCANOPY_NETWORK_ID` is set, Arborist refuses to *modify* anything outside 
 Some Scanopy resources are **organization-scoped, not network-scoped** — a tag, for example, has no `network_id` of its own. For those, confinement is decided by the operation's *reach*, tiered by severity (full analysis: `docs/scope-confinement-audit.md`):
 
 - **Create** (`create_tag`) touches no existing entity and proceeds.
-- **Mutate** (`update_tag`) changes the shared label everywhere the tag is referenced, so a scoped session scans every *visible* use and refuses if any falls outside — or cannot be attributed to — the configured network.
-- **Destroy** (`delete_tag`) is **always refused under a network scope.** Scanopy also accepts tags on user API keys, which an API key cannot read back (verified live: 403 on `/api/v1/auth/keys`), so no scan can prove an org-wide deletion stays in scope. Delete tags from an unscoped Arborist (the two-phase `confirm` flow still applies) or the Scanopy UI. A live canary test re-derives Scanopy's taggable-entity set on every integration run and fails loudly if it drifts from what these checks assume.
+- **Mutate** (`update_tag`) and **Destroy** (`delete_tag`) are **always refused under a network scope.** A tag's label is shared by every entity carrying it, and Scanopy also accepts tags on user API keys, which an API key cannot read back (verified live: 403 on `/api/v1/auth/keys`) — so no scan can prove that renaming or deleting a tag stays inside the configured network. Both refuse unconditionally rather than trust an enumeration that can never be complete. Rename or delete tags from an unscoped Arborist (delete's two-phase `confirm` flow still applies) or the Scanopy UI. A live canary test re-derives Scanopy's taggable-entity set on every integration run and fails loudly if it drifts from what these checks assume.
 
 ## Supported Scanopy versions
 

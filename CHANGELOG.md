@@ -12,14 +12,14 @@
   can prove an org-wide deletion stays inside a network scope, so scoped
   sessions refuse outright; delete tags from an unscoped Arborist (two-phase
   confirm unchanged) or the Scanopy UI. See `docs/scope-confinement-audit.md`.
-- **`update_tag` fails closed on out-of-scope *visible* use.** Renaming/restyling
-  a tag changes the label carried by every entity referencing it, so a scoped
-  session now scans visible usage and refuses if any use is outside (or not
-  attributable to) the configured network. **Known incomplete (F5 /
-  Stop Condition 11):** a tag whose only use is on a `UserApiKey` — which an
-  API key cannot read back — still passes this guard. The fix is more
-  restrictive than the prior release (which had no `update_tag` scope check at
-  all) but the residual is handed to a maintainer for a design decision; see
+- **`update_tag` now always refuses under `SCANOPY_NETWORK_ID`, exactly like
+  `delete_tag`.** Renaming/restyling a tag changes the shared label on every
+  entity carrying it, and that set includes the same unreadable `UserApiKey`
+  uses that block `delete_tag` — so a scoped session cannot prove the change
+  stays in scope. The refusal is unconditional and does **not** consult
+  `tag_usage()`: a usage-conditional check looks thorough but keeps a permanent
+  blind spot (this was finding F5 / the third occurrence of the tag-scope bug
+  class). Rename/restyle tags from an unscoped Arborist or the Scanopy UI. See
   `docs/scope-confinement-audit.md` §F5.
 - **`tag_usage` rebuilt from an empirical probe** of all Scanopy resource
   types: scans all nine enumerable taggable types (was five — Daemon,

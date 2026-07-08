@@ -6,8 +6,9 @@
   org-scoped records with no network attribution.
 - delete_tag ALWAYS refuses under a network scope (the UserApiKey blind spot
   makes the blast radius unverifiable, so there is no allow path to test).
-- update_tag fails closed on visible out-of-scope usage, proceeds when every
-  visible use is in scope.
+- update_tag ALWAYS refuses under a network scope too (F5 / operator Option 1),
+  regardless of what tag_usage() returns — the refusal is unconditional, not
+  usage-conditional, and does not consult tag_usage() at all.
 - update_host_metadata's no-op short-circuit cannot leak out-of-scope hosts.
 
 Live counterparts: tests/integration/test_fix_pass_live.py and the canary in
@@ -232,15 +233,40 @@ def test_delete_tag_unscoped_still_works() -> None:
     ]
 
 
-def test_update_tag_fails_closed_on_out_of_scope_use() -> None:
-    pages = _base_pages()
-    pages["/api/v1/daemons"] = [
-        {"id": "d1", "name": "other-net-daemon", "network_id": NET_B, "tags": [TAG]},
-    ]
+# ---------------------------------- update_tag: unconditional scoped refusal (F5)
+#
+# Operator decision (F5 handoff): update_tag refuses UNCONDITIONALLY whenever a
+# network scope is configured, exactly like delete_tag — NOT a usage-conditional
+# check. tag_usage()'s UserApiKey blind spot means "looks safe" can never be
+# proven, so the refusal must not depend on what tag_usage() returns. These two
+# cases prove the refusal is unconditional, not merely triggered on out-of-scope
+# usage: one with ZERO visible usage (the exact shape the original escape
+# exploited) and one with only IN-SCOPE visible usage. Both must refuse.
+
+
+def test_update_tag_refuses_under_scope_with_zero_visible_usage() -> None:
+    """Case 1 (§2): a tag whose tag_usage() is [] — the shape the UserApiKey
+    escape exploited — must STILL be refused under a scope. If this proceeds,
+    the refusal has a usage-conditional path in it that shouldn't exist."""
+    pages = _base_pages()  # no entity pages carry TAG -> tag_usage() == []
     puts: list[tuple[str, Any]] = []
+    usage_scans: list[str] = []
+
+    def track(pages_, cfg):
+        # Wrap so we can assert tag_usage() is never consulted for the decision.
+        client = _client_with_pages(pages_, cfg, puts=puts)
+        orig = client.tag_usage
+
+        async def spy(tag_id):  # pragma: no cover - should not be called
+            usage_scans.append(tag_id)
+            return await orig(tag_id)
+
+        client.tag_usage = spy  # type: ignore[method-assign]
+        mcp = build_mcp(cfg, client, bind_host="127.0.0.1", bind_port=60074)
+        return client, mcp
 
     async def go() -> None:
-        client, mcp = _tool_session(pages, make_config(SCANOPY_NETWORK_ID=NET_A), puts=puts)
+        client, mcp = track(pages, make_config(SCANOPY_NETWORK_ID=NET_A))
         try:
             async with create_connected_server_and_client_session(mcp._mcp_server) as s:
                 res = await s.call_tool("update_tag", {"tag": "mytag", "name": "renamed"})
@@ -251,9 +277,15 @@ def test_update_tag_fails_closed_on_out_of_scope_use() -> None:
 
     anyio.run(go)
     assert puts == [], f"refused update must make no write calls, saw {puts}"
+    assert usage_scans == [], (
+        "update_tag consulted tag_usage() in the scoped refusal path — the refusal "
+        "must be unconditional, not usage-conditional (F5 regression)"
+    )
 
 
-def test_update_tag_proceeds_when_all_visible_use_in_scope() -> None:
+def test_update_tag_refuses_under_scope_even_with_only_in_scope_use() -> None:
+    """Case 2 (§2): a tag whose only visible use is IN scope must STILL be
+    refused. Proves the check doesn't special-case 'looks safe' situations."""
     pages = _base_pages()
     pages["/api/v1/hosts"] = [
         {"id": "h1", "name": "in-scope", "network_id": NET_A, "tags": [TAG]},
@@ -264,12 +296,36 @@ def test_update_tag_proceeds_when_all_visible_use_in_scope() -> None:
         client, mcp = _tool_session(pages, make_config(SCANOPY_NETWORK_ID=NET_A), puts=puts)
         try:
             async with create_connected_server_and_client_session(mcp._mcp_server) as s:
+                res = await s.call_tool("update_tag", {"tag": "mytag", "color": "Red"})
+                assert res.isError
+                assert "Refusing to update tag" in res.content[0].text
+        finally:
+            await client.aclose()
+
+    anyio.run(go)
+    assert puts == [], f"refused update must make no write calls, saw {puts}"
+
+
+def test_update_tag_proceeds_when_unscoped() -> None:
+    """Without a scope the tool still works — the refusal is scope-gated, not a
+    blanket disable."""
+    pages = _base_pages()
+    pages["/api/v1/hosts"] = [
+        {"id": "h1", "name": "anywhere", "network_id": NET_B, "tags": [TAG]},
+    ]
+    puts: list[tuple[str, Any]] = []
+
+    async def go() -> None:
+        client, mcp = _tool_session(pages, make_config(), puts=puts)  # no scope
+        try:
+            async with create_connected_server_and_client_session(mcp._mcp_server) as s:
                 res = await s.call_tool("update_tag", {"tag": "mytag", "name": "renamed"})
                 assert not res.isError, res.content
         finally:
             await client.aclose()
 
     anyio.run(go)
+    assert [p for p, _ in puts] == [f"PUT /api/v1/tags/{TAG}"]
     put_paths = [p for p, _ in puts]
     assert put_paths == [f"PUT /api/v1/tags/{TAG}"]
 
