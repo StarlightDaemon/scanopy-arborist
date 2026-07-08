@@ -122,12 +122,27 @@ async def test_taggable_set_matches_client_constants(raw: RawScanopy) -> None:
     assert _TAGGABLE <= set(ScanopyClient._TAG_USAGE_SOURCES)
 
 
+#: Types that structurally cannot be created without a live scan daemon
+#: connected to the server, so they can never have an instance on the
+#: daemon-less CI fixture (.github/scanopy-ci/docker-compose.yml deliberately
+#: omits the daemon container). Verified empirically 2026-07-08:
+#: POST /api/v1/daemons is 405 Method Not Allowed (no field-only creation
+#: path exists at all), and POST /api/v1/discovery requires a `daemon_id`
+#: that fails a server-side existence check ("Daemon not found") for any ID
+#: that isn't an actually-connected daemon. This is a real environment gap,
+#: not something bootstrap.sh can seed around — full coverage for these two
+#: types comes from live verification against a daemon-attached instance
+#: instead (see the "(live)" examples in docs/usage-guide.md).
+_REQUIRES_LIVE_DAEMON = {"Daemon", "Discovery"}
+
+
 async def test_enumerable_types_list_with_expected_attribution(
     raw: RawScanopy,
 ) -> None:
     """Every path tag_usage scans must (a) answer a JSON list under API-key
     auth and (b) expose the attribution field the client reads. Instances are
-    created where the standard test instance may not have any."""
+    created where the standard test instance may not have any — except the
+    two types in _REQUIRES_LIVE_DAEMON, which cannot be created here at all."""
     org_id = (await raw.data("GET", "/api/v1/networks"))[0]["organization_id"]
     created: list[str] = []  # (path with id) to DELETE at teardown
     try:
@@ -148,6 +163,19 @@ async def test_enumerable_types_list_with_expected_attribution(
                                                     "value": "public"}}},
         )
         created.append(f"/api/v1/credentials/{cred['id']}")
+        # Service has no standalone existence outside a host; create_host's
+        # service_name param embeds one and the fixture cleans up the host
+        # (and its services) via created_host_ids teardown.
+        await raw.create_host(
+            f"arborist-canary-svc-host-{uuid.uuid4().hex[:6]}",
+            service_name=f"arborist-canary-svc-{uuid.uuid4().hex[:6]}",
+        )
+        daemon_key = await raw.data(
+            "POST", "/api/v1/auth/daemon",
+            json={"name": f"arborist-canary-daemon-key-{uuid.uuid4().hex[:6]}",
+                  "network_id": raw.network_id},
+        )
+        created.append(f"/api/v1/auth/daemon/{daemon_key['api_key']['id']}")
 
         problems: list[str] = []
         for etype, (path, kind) in ScanopyClient._TAG_USAGE_SOURCES.items():
@@ -161,6 +189,8 @@ async def test_enumerable_types_list_with_expected_attribution(
                 continue
             items = resp.json().get("data") or []
             if not items:
+                if etype in _REQUIRES_LIVE_DAEMON:
+                    continue
                 problems.append(
                     f"{etype}: no instance available on the test instance to "
                     f"verify attribution field — canary requires one"
