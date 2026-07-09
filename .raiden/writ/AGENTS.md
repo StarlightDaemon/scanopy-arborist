@@ -45,6 +45,11 @@ Before any repo-local work, read in this order. Stop when you have what the task
 
 Read only the subtree relevant to the task beyond step 2.
 
+The repo-root `CLAUDE.md` is a pointer to `AGENTS.md` only — it carries no
+substantive governance (see `OPERATING_RULES.md`, "Root CLAUDE.md Is a Pointer
+Only"). Do not read it for policy; substantive local rules live in
+`.raiden/local/rules/`.
+
 ---
 
 ## Memory Precedence (D-0041)
@@ -58,6 +63,21 @@ When native memory and RAIDEN's committed state disagree on any project fact,
 memory; any project fact worth retaining is written to `.raiden/state/` in the
 same pass. Native memory is invisible to other operators, hosts, and models —
 committed state travels with the repo to whatever reads it next.
+
+Every durable fact has one authoritative home; other surfaces reference it and
+never restate its value (the fact-home rule in `OPERATING_RULES.md`). The
+installed Edict version, in particular, lives in
+`.raiden/instance/metadata.json` and is never copied into state prose.
+
+---
+
+## Model Routing
+
+RAIDEN protocols route work along a **cost/capability ladder**, defined in
+`ROUTING_POLICY.md` (managed). Protocols name a rung — "the top rung", "a rung
+cleared for mechanical work", "a judgment-appropriate rung" — never a model. The
+ladder's actual rungs and the models bound to each are operator-defined in the
+local overlay `.raiden/local/ROUTING.md`, never in a managed file.
 
 ---
 
@@ -85,12 +105,14 @@ files directly; `plan` is the post-install verification authority.
 Run from `toolkit/updater/` within the RAIDEN repo:
 
 ```
-python3 -m raiden_updater.cli plan  --instance <this-repo-path> --package <path>
-python3 -m raiden_updater.cli apply --instance <this-repo-path> --package <path>
+python3 -m raiden_updater.cli plan   --instance <this-repo-path> --package <path>
+python3 -m raiden_updater.cli apply  --instance <this-repo-path> --package <path>
+python3 -m raiden_updater.cli doctor --instance <this-repo-path>
 ```
 
 - `plan` — read-only; exits 0 if apply-safe or already current, exits 1 otherwise
 - `apply` — requires an apply-safe plan; raises `ApplyError` otherwise
+- `doctor` — read-only per-instance structural and freshness verification; writes nothing
 
 ### Edict package location
 
@@ -141,13 +163,20 @@ If `git init` creates `master`, rename immediately: `git branch -m master main`.
 
 **May write:**
 - Repo source files (subject to this repo's project rules)
-- `.raiden/local/` — local overlay: prompts, rules, project-specific context
-- `.raiden/state/` — live continuity: `CURRENT_STATE.md`, `OPEN_LOOPS.md`, `DECISIONS.md`, `WORK_LOG.md`
+- `.raiden/local/` — local overlay: prompts, rules, project-specific context, `ROUTING.md`
+- `.raiden/state/` — live continuity under **state schema v2**: required set
+  `README.md`, `CURRENT_STATE.md`, `OPEN_LOOPS.md`, `DECISIONS.md`,
+  `WORK_LOG.md` (optional: `GOALS.md`, `SNAPSHOTS/`). Protocol-owned state files
+  (audit and fork-review ledgers) are written by their protocols, not by hand.
 
 **Must not write:**
 - `.raiden/writ/` — RAIDEN-managed core; any change requires the Edict update path
 - Files in the RAIDEN central repo (unless operating as the RAIDEN agent)
 - The `commit-msg` hook — do not remove, bypass, or modify it
+
+The Instance's `metadata.json` records `state_schema_version` (2). The full
+state set, including protocol-owned and install-time artifacts, is defined in
+`toolkit/instance/STRUCTURE.md`.
 
 ---
 
@@ -174,8 +203,8 @@ Files installed by the current Writ under `.raiden/writ/`:
 | File | Purpose |
 |---|---|
 | `README.md` | Writ managed-core index |
-| `OPERATING_RULES.md` | Core operating rules, ownership boundary, Report-and-Hold, commit attribution |
-| `MODEL_TIERS.md` | Capability-tier semantics referenced by the protocols |
+| `OPERATING_RULES.md` | Core operating rules, ownership boundary, Report-and-Hold, commit attribution, fact-home rule, one-writer-per-repo, citation namespace, CLAUDE.md pointer rule |
+| `ROUTING_POLICY.md` | The cost/capability routing ladder referenced by the protocols |
 | `WORKSPACE_AUDIT_PROTOCOL.md` | Workspace audit specification |
 | `FORK_REVIEW_PROTOCOL.md` | Fork review protocol |
 | `AGENTS.md` | This file — full agent guide |

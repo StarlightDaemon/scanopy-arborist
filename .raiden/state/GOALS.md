@@ -29,5 +29,5 @@ Scanopy's scanner discovered.
 
 ## Provenance
 
-RAIDEN Instance installed 2026-07-08 (Edict v1.0.0). Goals captured from
+RAIDEN Instance installed 2026-07-08. Goals captured from
 README.md, CHANGELOG.md, and RELEASE.md at install time.

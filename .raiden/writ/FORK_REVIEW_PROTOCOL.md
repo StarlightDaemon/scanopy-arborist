@@ -28,9 +28,9 @@ This Edict is canonical under RAIDEN's authority order. It is installed into `.r
 
 ## Model Expectation
 
-The fork review requires a model capable of precise diff reasoning, change-level attribution across multiple files, cross-fork synthesis judgment, and a speculative observations pass. Route to **TIER_DEEP_REASONING** (see `MODEL_TIERS.md`); if that tier's model is unavailable, fall back to **TIER_FALLBACK**.
+The fork review requires a model capable of precise diff reasoning, change-level attribution across multiple files, cross-fork synthesis judgment, and a speculative observations pass. Route to **the top available rung** (see `ROUTING_POLICY.md`); if the top rung's model is unavailable, the adjacent rung is the natural substitute per the ladder's built-in fallback.
 
-Per-Instance routing config may override this preference; see Synthesis Routing for routing-config lookup. Tiers resolve to concrete models through the operator's local mapping (`.raiden/local/MODEL_MAP.md`).
+Per-Instance routing config may override this preference; see Synthesis Routing for routing-config lookup. Rungs resolve to concrete models through the operator's local mapping (`.raiden/local/ROUTING.md`).
 
 ## Hard Constraints
 
@@ -46,7 +46,7 @@ Per-Instance routing config may override this preference; see Synthesis Routing 
 - Each fork is analyzed individually against the baseline, then collectively against each other.
 - Read RAIDEN orientation in order: `AGENTS.md` → `.raiden/README.md` → `.raiden/state/CURRENT_STATE.md` → `.raiden/state/OPEN_LOOPS.md`. These are authoritative for the Instance's structure, conventions, and current state.
 - Read `/forks/MANIFEST.md` as the authoritative inventory of forks to review. Any file flagged in the manifest as having an unknown author or unresolved conflict is noted in each relevant report section; the review proceeds but flags carry through.
-- Locate scoped model-routing config if present (`.raiden/routing.md`, `.raiden/models.md`, `.raiden/agents.md`, or a routing section in `RAIDEN.md`). If found, it is authoritative for the Recommended model field on each synthesis candidate.
+- Locate scoped model-routing config if present (`.raiden/local/ROUTING.md`, `.raiden/routing.md`, `.raiden/models.md`, `.raiden/agents.md`, or a routing section in `RAIDEN.md`). If found, it is authoritative for the Recommended model field on each synthesis candidate.
 
 ## Review Categories
 
@@ -159,19 +159,19 @@ Every synthesis candidate is tagged with routing metadata for downstream prompt 
 
 ### Step 1: Apply scoped routing config if found
 
-If a scoped routing config exists (`.raiden/routing.md`, `.raiden/models.md`, `.raiden/agents.md`, or a routing section in `RAIDEN.md`), its assignments are authoritative for the Recommended model field. Use them verbatim where they cover the change type.
+If a scoped routing config exists (`.raiden/local/ROUTING.md`, `.raiden/routing.md`, `.raiden/models.md`, `.raiden/agents.md`, or a routing section in `RAIDEN.md`), its assignments are authoritative for the Recommended model field. Use them verbatim where they cover the change type.
 
 ### Step 2: For candidates not covered by scoped config, classify by class
 
-| Class | Description | Default capability tier |
+| Class | Description | Default ladder rung |
 |---|---|---|
-| MECHANICAL | Direct port of a self-contained change with no judgment required (new constant, settings field, isolated helper) | TIER_FAST_EXECUTION |
-| TARGETED-PORT | Bounded change in 1–2 functions requiring light adaptation (behavioral tweak, patched logic) | TIER_FALLBACK |
-| MULTI-UNIT-INTEGRATION | Coordinated changes across multiple functions or structural areas | TIER_LONG_CONTEXT_REVIEW |
-| CONFLICT-RESOLUTION | Requires operator-informed judgment to resolve competing fork implementations before porting | TIER_DEEP_REASONING |
-| SPECULATIVE-TRIAGE | First decide whether the change is worth porting; two-stage (triage → class-appropriate port if confirmed) | TIER_DEEP_REASONING |
+| MECHANICAL | Direct port of a self-contained change with no judgment required (new constant, settings field, isolated helper) | Any rung cleared for mechanical work |
+| TARGETED-PORT | Bounded change in 1–2 functions requiring light adaptation (behavioral tweak, patched logic) | The lowest rung trusted with a bounded port unsupervised |
+| MULTI-UNIT-INTEGRATION | Coordinated changes across multiple functions or structural areas | A judgment-appropriate rung for coordinated multi-unit work |
+| CONFLICT-RESOLUTION | Requires operator-informed judgment to resolve competing fork implementations before porting | The top available rung |
+| SPECULATIVE-TRIAGE | First decide whether the change is worth porting; two-stage (triage → class-appropriate port if confirmed) | The top available rung |
 
-Tiers are defined in `MODEL_TIERS.md` and resolved to concrete models through the operator's local mapping (`.raiden/local/MODEL_MAP.md`). When in doubt between two classes, the more cautious class wins — prefer TIER_DEEP_REASONING over TIER_FALLBACK, and TIER_FALLBACK over TIER_FAST_EXECUTION.
+Rungs are defined by `ROUTING_POLICY.md` and resolved to concrete models through the operator's local mapping (`.raiden/local/ROUTING.md`). When in doubt between two classes, the more cautious class wins — prefer the higher rung; when in doubt, one rung up.
 
 ### Step 3: Write a synthesis seed
 
@@ -242,6 +242,8 @@ fork-reports/synthesis-{YYYY-MM-DD}.md
 ### State Publication
 
 After all reports are written, the review agent publishes two state files. Both reference the exact filenames of the reports just written.
+
+`FORK_REVIEW_LOG.md` and `last-fork-review.md` are **protocol-owned state files**, canonized in state schema v2 (`toolkit/instance/STRUCTURE.md`). They are created and maintained by this protocol, not by hand, and are gitignored on public Instances per D-0038 alongside the audit ledgers.
 
 **1. `.raiden/state/FORK_REVIEW_LOG.md` (rolling, append-only)** — prepend a new entry to the top of the entries section:
 

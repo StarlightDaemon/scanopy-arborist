@@ -79,3 +79,67 @@ The mainline branch in every RAIDEN Instance must be named `main`.
 - If `git init` created a `master` branch, rename it before the first RAIDEN
   install commit: `git branch -m master main`
 - Do not create or leave a `master` branch as the default.
+
+## Fact-Home Rule
+
+Every durable fact has **exactly one authoritative surface**. Every other
+surface may **reference** it — by pointer or ID — but must **not restate its
+value**. A fact that lives in one place cannot disagree with itself; the moment
+a fact is copied into prose in a second place, one copy starts to rot and
+nothing measures which. This is the same discipline the Writ applies to law
+(one hashed source of truth), applied to state.
+
+Authoritative homes inside an Instance:
+
+| Fact | Authoritative home | Everything else does |
+|---|---|---|
+| Installed Edict version | `.raiden/instance/metadata.json` | never restated in state prose |
+| Writ composition | manifest + baseline | never listed in state prose |
+| Loop status | `.raiden/state/OPEN_LOOPS.md` entry | `CURRENT_STATE.md` cites `LOOP-xxx` without restating open/closed |
+| Decisions | `.raiden/state/DECISIONS.md` | cited by ID, never re-summarized as if authoritative |
+| When a file was last true | git history of that file | **no hand-written "Last Updated" / "Last Verified" date footers** |
+| Volatile counts (tests, commits, components) | the repo itself | stated in prose only inside dated `WORK_LOG.md` entries, never in `CURRENT_STATE.md` |
+| Fleet roster / versions / lifecycle | the ops registry (private ops repo) | cited across repos via the citation namespace below, never re-tallied in an Instance |
+
+Corollaries:
+
+- Do **not** write the installed Edict version into `CURRENT_STATE.md` or any
+  other state prose. Read it from `metadata.json`.
+- Do **not** restate a loop's open/closed status where the loop is cited; the
+  citation carries the reader to the authoritative entry.
+- Volatile counts belong in a **dated** `WORK_LOG.md` entry (a snapshot with a
+  date is a historical record, not a current-state claim); they do not belong in
+  `CURRENT_STATE.md`, where they are stale the moment work continues.
+- Retire hand-maintained "Last Updated" footers. Freshness is derived from git,
+  which already records exactly when a file was last true; a footer that lies is
+  worse than no footer.
+
+## One Writer Per Repo
+
+At most **one agent session writes a given repo at a time.** Parallel work fans
+out **across** repos, not **within** one. Two sessions mutating the same repo
+race on non-atomic multi-file writes and silently clobber each other's state;
+the safe unit of concurrency is the repository, not the file. When more work is
+available than one session can carry, dispatch additional sessions to *other*
+repos rather than a second session into the same one.
+
+## Cross-Repo Citation Namespace
+
+References to another repo's work items use the form
+**`<RegistryName>:LOOP-xxx`** and **`<RegistryName>:D-xxx`**, where
+`<RegistryName>` is that Instance's name in the ops registry. The registry name
+is the namespace; each Instance keeps its own local `LOOP-`/`D-` sequence.
+Renumbering every repo's history into one global sequence would be pure churn —
+the ambiguity only ever hurts at the **citation site**, and a namespace prefix
+resolves it there. A bare `LOOP-004` means "this repo's LOOP-004"; another
+repo's is `Atlas:LOOP-004`.
+
+## Root CLAUDE.md Is a Pointer Only
+
+In a RAIDEN Instance, the repo-root `CLAUDE.md` is a **pointer only** — at most
+three lines directing the reader to `AGENTS.md`. It carries **no substantive
+governance**. Two auto-loaded surfaces with independent substantive content is
+how an Instance ends up governed by two things that disagree (the fact-home rule
+applied to instructions). Substantive local governance lives in
+`.raiden/local/rules/` (or in the root `AGENTS.md` bridge itself when short),
+where it survives updates and sits inside the inventoried overlay boundary.

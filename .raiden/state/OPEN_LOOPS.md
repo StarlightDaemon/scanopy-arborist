@@ -49,5 +49,5 @@ Work must be executed one loop at a time.
 
 ## Provenance
 
-- RAIDEN Instance installed 2026-07-08 (Edict v1.0.0). No prior ledger to
+- RAIDEN Instance installed 2026-07-08. No prior ledger to
   migrate from — this is the project's first RAIDEN state record.

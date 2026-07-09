@@ -1,30 +1,30 @@
 {
-  "installed_edict_version": "1.0.1",
-  "installed_at": "2026-07-08T07:52:24.572559+00:00",
+  "installed_edict_version": "2.0.0",
+  "installed_at": "2026-07-09T09:26:53.412991+00:00",
   "managed_files": [
     {
       "path": "README.md",
-      "hash": "9465f501f11fce972d3952cc2ba3e9d19917518f5af6fb4347db27ee66155216"
+      "hash": "55833568370125101a9b8ccff11b03f2b5841922c0aa5124ec37ea6dc9d5af74"
     },
     {
       "path": "OPERATING_RULES.md",
-      "hash": "4c1879f827e9a6af7969d3cd45d2cbb60c2e3cf26de57b30a8c86955a49fd039"
+      "hash": "bdbb6cfb9c8a39d69b98ed68920dc5f2faec5ed32b249480c828fd98e23373ec"
     },
     {
-      "path": "MODEL_TIERS.md",
-      "hash": "00879028285e5647de3d10089a63b2a6adf6740878c52f8e14af1f66e763f6f0"
+      "path": "ROUTING_POLICY.md",
+      "hash": "972c3cbaa9b40ff9e43fc1857ba4f274ad7b52aa21416ed50e28d8811b3fb800"
     },
     {
       "path": "WORKSPACE_AUDIT_PROTOCOL.md",
-      "hash": "db0f2ef3352235d207c427a457752ca3e72259fcc4812fb9a356241694a67abf"
+      "hash": "e7c5a8b71aa06ef3bf565c03c3d3c391b7613a90c5cd0beef3e8a02aea0955a4"
     },
     {
       "path": "FORK_REVIEW_PROTOCOL.md",
-      "hash": "4bf4da56e057783049c133af6c61a1f184e77e71561c8f8aa045a3738769b174"
+      "hash": "651d5de656b2755f156f6eed524a44e70b18048262bd685c6b1a440bb96f2d04"
     },
     {
       "path": "AGENTS.md",
-      "hash": "357cf8a22c2019ba6b773531346f8ab57ff52d82500e733648d457c5c9a1e150"
+      "hash": "9112ec103b3781070af07e28b290bdf5afcf1f4b1f7124bd05122a7d6087e290"
     }
   ],
   "hook_files": [

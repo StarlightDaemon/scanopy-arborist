@@ -29,9 +29,9 @@ This Edict is canonical under RAIDEN's authority order. It is installed into `.r
 
 ## Model expectation
 
-The audit requires a model capable of severity judgment, Raiden-doc cross-referencing, and a speculative observations pass. Route to **TIER_DEEP_REASONING** (see `MODEL_TIERS.md`); if that tier's model is unavailable, fall back to **TIER_FALLBACK**.
+The audit requires a model capable of severity judgment, Raiden-doc cross-referencing, and a speculative observations pass. Route to **the top available rung** (see `ROUTING_POLICY.md`); if the top rung's model is unavailable, the adjacent rung is the natural substitute per the ladder's built-in fallback.
 
-Per-Instance routing config may override this preference; see Remediation Routing for routing-config lookup. Tiers resolve to concrete models through the operator's local mapping (`.raiden/local/MODEL_MAP.md`).
+Per-Instance routing config may override this preference; see Remediation Routing for routing-config lookup. Rungs resolve to concrete models through the operator's local mapping (`.raiden/local/ROUTING.md`).
 
 ## Hard Constraints
 
@@ -48,7 +48,7 @@ Per-Instance routing config may override this preference; see Remediation Routin
 - Cover tracked files at HEAD plus a sample of git history (for secret detection).
 - Polyglot: auto-detect ecosystems present (Node, Python, Go, Rust, Ruby, Java/JVM, .NET, PHP, etc.). Skip cleanly when an ecosystem is absent.
 - Read the target's canonical orientation. For RAIDEN Instances: `AGENTS.md` → `.raiden/README.md` → `.raiden/state/CURRENT_STATE.md` → `.raiden/state/OPEN_LOOPS.md`. For framework repos or other non-Instance targets without a `.raiden/` layer: read the root-level canonical docs that exist (typically `README.md`, governance docs like `GOVERNANCE.md` or `REPOSITORY_MAP.md`, and any present state files like `CURRENT_STATE.md`, `OPEN_LOOPS.md`, `DECISIONS.md`).
-- Locate scoped model-routing config if present. Search `.raiden/routing.md`, `.raiden/models.md`, `.raiden/agents.md`, a routing section in a separate `RAIDEN.md`, or — for framework repos and non-Instance targets — root-level equivalents like `routing.md`, `models.md`, or routing sections in canonical governance docs. If found, it is authoritative for the Recommended model field on each actionable finding. If absent everywhere, fall back to the class defaults in Remediation Routing.
+- Locate scoped model-routing config if present. Search `.raiden/local/ROUTING.md` (the canonical routing overlay), then `.raiden/routing.md`, `.raiden/models.md`, `.raiden/agents.md`, a routing section in a separate `RAIDEN.md`, or — for framework repos and non-Instance targets — root-level equivalents like `routing.md`, `models.md`, or routing sections in canonical governance docs. If found, it is authoritative for the Recommended model field on each actionable finding. If absent everywhere, fall back to the class defaults in Remediation Routing.
 
 ## Audit Categories
 
@@ -130,21 +130,21 @@ Every actionable finding (one with a Recommended action) is tagged with routing 
 
 ### Step 1: Apply scoped routing config if found
 
-If a scoped routing config exists (`.raiden/routing.md`, `.raiden/models.md`, `.raiden/agents.md`, a routing section in `RAIDEN.md`, or — for framework repos and non-Instance targets — root-level equivalents like `routing.md`, `models.md`, or routing sections in canonical governance docs), its assignments are authoritative for the Recommended model field. Use them verbatim where they cover the finding type.
+If a scoped routing config exists (`.raiden/local/ROUTING.md`, `.raiden/routing.md`, `.raiden/models.md`, `.raiden/agents.md`, a routing section in `RAIDEN.md`, or — for framework repos and non-Instance targets — root-level equivalents like `routing.md`, `models.md`, or routing sections in canonical governance docs), its assignments are authoritative for the Recommended model field. Use them verbatim where they cover the finding type.
 
 ### Step 2: For findings not covered by scoped config, classify by class
 
-| Class | Description | Default capability tier |
+| Class | Description | Default ladder rung |
 |---|---|---|
-| MECHANICAL | Deterministic edit, no judgment (version bump, `.gitignore` line, license field) | TIER_FAST_EXECUTION |
-| TARGETED-FIX | Bounded change, 1–2 files (broken link, single-function bug, stale TODO triage) | TIER_FALLBACK |
-| MULTI-FILE-REFACTOR | Coordinated changes across many files (rename, API migration, structural reorg) | TIER_LONG_CONTEXT_REVIEW |
-| SECURITY-CRITICAL | Careful review required (CVE remediation, credential rotation, auth/crypto, history rewrite) | TIER_DEEP_REASONING |
-| CONFIG/CI | Workflows, build config, scripts; validation-oriented | TIER_FALLBACK |
-| DOC-EDIT | README, markdown, comments only | TIER_FAST_EXECUTION |
-| SPECULATIVE-TRIAGE | First decide whether to act; two-stage (triage → class-appropriate remediation if confirmed real) | TIER_DEEP_REASONING |
+| MECHANICAL | Deterministic edit, no judgment (version bump, `.gitignore` line, license field) | Any rung cleared for mechanical work |
+| TARGETED-FIX | Bounded change, 1–2 files (broken link, single-function bug, stale TODO triage) | The lowest rung trusted with a bounded fix unsupervised |
+| MULTI-FILE-REFACTOR | Coordinated changes across many files (rename, API migration, structural reorg) | A judgment-appropriate rung for coordinated multi-file work |
+| SECURITY-CRITICAL | Careful review required (CVE remediation, credential rotation, auth/crypto, history rewrite) | The top available rung |
+| CONFIG/CI | Workflows, build config, scripts; validation-oriented | The lowest rung trusted with validation-oriented config work |
+| DOC-EDIT | README, markdown, comments only | Any rung cleared for mechanical work |
+| SPECULATIVE-TRIAGE | First decide whether to act; two-stage (triage → class-appropriate remediation if confirmed real) | The top available rung |
 
-Tiers are defined in `MODEL_TIERS.md` and resolved to concrete models through the operator's local mapping (`.raiden/local/MODEL_MAP.md`). When in doubt between two classes, the more cautious class wins — prefer TIER_DEEP_REASONING over TIER_FALLBACK, and TIER_FALLBACK over TIER_FAST_EXECUTION.
+Rungs are defined by `ROUTING_POLICY.md` and resolved to concrete models through the operator's local mapping (`.raiden/local/ROUTING.md`). When in doubt between two classes, the more cautious class wins — prefer the higher rung; when in doubt, one rung up.
 
 ### Step 3: Write a remediation seed
 
@@ -194,6 +194,8 @@ Create the `audit-reports/` directory if absent.
 ### State Publication
 
 After the report is written, the audit agent publishes two state files. Both reference the exact filename of the report just written (including any `-HHMMSS` suffix used for collision avoidance).
+
+`AUDIT_LOG.md` and `last-audit.md` are **protocol-owned state files**, canonized in state schema v2 (`toolkit/instance/STRUCTURE.md`). They are created and maintained by this protocol, not by hand, and are gitignored on public Instances per D-0038 (they carry operational vulnerability intelligence).
 
 If `.raiden/state/` exists in the audited repo, publish to the canonical paths below. If `.raiden/state/` does not exist (target is a framework repo or non-Instance), fall back to publishing alongside the audit report at `audit-reports/AUDIT_LOG.md` and `audit-reports/last-audit.md`. The Appendix MUST note which path set was used.
 

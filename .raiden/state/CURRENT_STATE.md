@@ -18,9 +18,9 @@
   publish.
 - Confirmed: test suite and `.github/` CI workflow are in place; `.venv`,
   `.pytest_cache`, `.ruff_cache` present from local dev.
-- Confirmed: RAIDEN Instance installed 2026-07-08 at Edict v1.0.0. Repo now
+- Confirmed: RAIDEN Instance installed 2026-07-08. Repo now
   has a GitHub remote (`StarlightDaemon/scanopy-arborist`, public) as of this
-  install — see `RAIDEN-ops/logs/DISTRIBUTION_LOG.md` and `LOOP-0021`.
+  install — see `RAIDEN-ops/logs/DISTRIBUTION_LOG.md` and `Raiden-ops:LOOP-0021`.
 
 ## Constraints
 
@@ -32,8 +32,8 @@
 
 ## Provenance
 
-- RAIDEN Instance installed 2026-07-08 (Edict v1.0.0), following the scan and
-  install recorded under LOOP-0021 in RAIDEN-ops.
+- RAIDEN Instance installed 2026-07-08, following the scan and
+  install recorded under `Raiden-ops:LOOP-0021`.
 - State captured from README.md, CHANGELOG.md, and docs/ at install time —
   not migrated from a prior ledger (this is the project's first RAIDEN state
   record).
