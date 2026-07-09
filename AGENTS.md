@@ -23,5 +23,6 @@ This repo runs a RAIDEN Instance control plane in `.raiden/`.
 
 ## RAIDEN Tooling
 
-Lives in the RAIDEN central repo at `/Users/dante/Citadel/Raiden/` — not in this repo.
+Lives in the central RAIDEN framework repo (path is operator-specific; recorded in
+`.raiden/local/README.md`) — not in this repo.
 Invoke from there with `--instance <this-repo-path>` or `--target <this-repo-path>`.
