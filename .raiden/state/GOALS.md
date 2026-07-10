@@ -18,8 +18,8 @@ Scanopy's scanner discovered.
 | 5 | Network-scope confinement (hosts, services, subnets, bindings) | Done |
 | 6 | Org-scoped resource (tag) confinement audit | Done — F5 scope-confinement pass, 2026-07-07 |
 | 7 | Deployment targets (Docker, Podman Quadlet, Proxmox LXC) | Done |
-| 8 | GitHub remote + publish (`OWNER` placeholder fill-in) | Pending — operator action |
-| 9 | Cut `v0.1.0` tag per RELEASE.md | Pending |
+| 8 | GitHub remote + publish (`OWNER` placeholder fill-in) | Done — 2026-07-09 (LOOP-001) |
+| 9 | Cut `v0.1.0` tag per RELEASE.md | Done — 2026-07-09 (LOOP-001) |
 
 ## Out of Scope (current)
 

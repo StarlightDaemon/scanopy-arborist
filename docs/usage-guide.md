@@ -4,20 +4,13 @@ This is a start-to-finish walkthrough for setting up Arborist and using it day t
 day. For a quick reference (env var table, tool list), see the [README](../README.md) —
 this document goes deeper into *why* and *how*, with real examples.
 
-> **Current repo state, checked against this guide's own source:** as of this
-> writing there is no `git remote`, no `v0.1.0` tag, and `OWNER` is still a
-> literal placeholder throughout the repo (`pyproject.toml`,
-> `deploy/docker/docker-compose.yml`, `deploy/podman/arborist.container`,
-> `deploy/lxc/`). `arborist --version` prints `arborist 0.1.0b1` — the beta
-> suffix from `pyproject.toml`, not the `v0.1.0` name used in the CHANGELOG and
-> [RELEASE.md](../RELEASE.md). In other words: this is a **from-source install
-> today**, not a cut release. Everything below is written to work against that
-> reality; where the README or RELEASE.md shows a `git+https://github.com/OWNER/...`
-> or `ghcr.io/OWNER/...` reference, that path only resolves once you (or
-> whoever's running this repo) fills in `OWNER` and follows RELEASE.md to cut a
-> tag and push it somewhere. This guide shows both: what works right now
-> against your own checkout, and the form the same command takes once
-> published.
+> **Current repo state, checked against this guide's own source:** Arborist is
+> published at `github.com/StarlightDaemon/scanopy-arborist`, `v0.1.0` is
+> tagged, and `arborist --version` prints `arborist 0.1.0`. No Docker image has
+> been pushed to `ghcr.io/starlightdaemon/scanopy-arborist-mcp` yet (PyPI
+> publishing is also out of scope for this release) — installing from the git
+> tag, or from source, are the supported paths. This guide shows both: from
+> your own checkout, and from the published `v0.1.0` tag.
 
 ## 1. What Arborist does
 
@@ -47,13 +40,13 @@ ports, interfaces stay untouched, by construction, not just by policy).
 
 ## 3. Installing the `arborist` command
 
-### From source (works today)
+### From source
 
 ```sh
-git clone <this-repo>
-cd scanopy-arborist-mcp
+git clone https://github.com/StarlightDaemon/scanopy-arborist
+cd scanopy-arborist
 uv sync
-uv run arborist --version    # arborist 0.1.0b1
+uv run arborist --version    # arborist 0.1.0
 ```
 
 `uv run arborist ...` works from inside the checkout without a separate
@@ -66,14 +59,13 @@ uv tool install .
 arborist --version
 ```
 
-### From a published release (once `OWNER` is filled in and a tag exists)
+### From the published `v0.1.0` release
 
-This is what the README's Quickstart shows, and it'll work as soon as
-someone runs the [RELEASE.md](../RELEASE.md) sequence against a real GitHub repo:
+This is what the README's Quickstart shows:
 
 ```sh
-uv tool install git+https://github.com/OWNER/scanopy-arborist-mcp.git@v0.1.0
-# or: pip install git+https://github.com/OWNER/scanopy-arborist-mcp.git@v0.1.0
+uv tool install git+https://github.com/StarlightDaemon/scanopy-arborist.git@v0.1.0
+# or: pip install git+https://github.com/StarlightDaemon/scanopy-arborist.git@v0.1.0
 ```
 
 ## 4. Deployment
@@ -94,8 +86,8 @@ docker compose up --build -d
 ```
 
 `--build` is required today since no image has been pushed to
-`ghcr.io/OWNER/scanopy-arborist-mcp` yet; the compose file's `image:` line is
-only reachable after that publish step. The container binds `0.0.0.0:60074`
+`ghcr.io/starlightdaemon/scanopy-arborist-mcp` yet; the compose file's `image:`
+line is only reachable after that publish step. The container binds `0.0.0.0:60074`
 *inside* Docker's network, but the compose file publishes it to the Docker
 **host's loopback only** (`127.0.0.1:60074:60074`) — if you widen that
 publish, put a TLS-terminating reverse proxy in front and extend
@@ -103,10 +95,11 @@ publish, put a TLS-terminating reverse proxy in front and extend
 
 ### Podman Quadlet — `deploy/podman/arborist.container`
 
-Requires podman ≥ 4.6. Before installing, edit `arborist.container`: replace
-`OWNER` in the `Image=` line, and point `SCANOPY_BASE_URL` at your instance
-(the placeholder `scanopy.example.lan` won't resolve). If you haven't
-published an image yet, build and tag one locally first
+Requires podman ≥ 4.6. Before installing, edit `arborist.container`: point
+`SCANOPY_BASE_URL` at your instance (the placeholder `scanopy.example.lan`
+won't resolve). The `Image=` line ships pointing at
+`ghcr.io/starlightdaemon/scanopy-arborist-mcp`, but since no image has been
+published there yet, build and tag one locally first
 (`docker build -f deploy/docker/Dockerfile -t <your-tag> .`) and point
 `Image=` at that instead.
 
@@ -160,14 +153,16 @@ pair hasn't been merged into community-scripts/ProxmoxVED yet, so
 find it. Run the ct script from this repo's raw URL instead:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/OWNER/scanopy-arborist-mcp/main/deploy/lxc/ct/arborist.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/StarlightDaemon/scanopy-arborist/main/deploy/lxc/ct/arborist.sh)"
 ```
 
-— which itself needs `OWNER` filled in and pushed before it resolves. Until
-then, the practical path is a manual install: create a Debian 13 LXC yourself
-and run the commands from `install/arborist-install.sh` starting at
-`setup_uv` by hand (substituting a manual `uv` install and a GitHub tarball
-download for the community-scripts helper functions it otherwise uses).
+Until this pair is merged upstream into community-scripts/ProxmoxVED,
+`build.func`'s automated fetch of the matching install script won't find it
+(see `deploy/lxc/README.md`'s hosting caveat). The practical fallback is a
+manual install: create a Debian 13 LXC yourself and run the commands from
+`install/arborist-install.sh` starting at `setup_uv` by hand (substituting a
+manual `uv` install and a GitHub tarball download for the community-scripts
+helper functions it otherwise uses).
 
 The installer deliberately **does not start** the service — it writes
 `/opt/arborist/.env` with a freshly generated `ARBORIST_AUTH_TOKEN` and
@@ -270,7 +265,7 @@ Working from the checkout without a separate install:
 claude mcp add arborist \
   -e SCANOPY_BASE_URL=http://scanopy.lan:60072 \
   -e SCANOPY_API_KEY=scp_u_xxxxxxxx \
-  -- uv run --directory /path/to/scanopy-arborist-mcp arborist
+  -- uv run --directory /path/to/scanopy-arborist arborist
 ```
 
 Add `-e ARBORIST_PROFILE=readwrite` to either form to enable the curation
@@ -294,7 +289,7 @@ For Claude Desktop, the equivalent is `claude_desktop_config.json`:
 }
 ```
 
-(Once published, `uvx --from git+https://github.com/OWNER/scanopy-arborist-mcp.git@v0.1.0 arborist`
+(`uvx --from git+https://github.com/StarlightDaemon/scanopy-arborist.git@v0.1.0 arborist`
 as the `command`/`args` lets Desktop fetch it on demand with no local install
 step at all — see the README Quickstart for that exact form.)
 

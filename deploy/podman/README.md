@@ -9,7 +9,8 @@ Requires **podman >= 4.6** (Quadlet with `Secret=...,type=env`). Verify with
 
 Before installing, edit `arborist.container`:
 
-- `Image=` — replace `OWNER` with the actual GHCR owner of the image.
+- `Image=` — ships pointing at `ghcr.io/starlightdaemon/scanopy-arborist-mcp`;
+  change it if you're building/publishing your own fork's image.
 - `SCANOPY_BASE_URL` — point at your Scanopy instance (the placeholder
   `http://scanopy.example.lan:60072` will not resolve).
 - Uncomment the optional `ARBORIST_PROFILE` / `SCANOPY_NETWORK_ID` /

@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## v0.1.0 — 2026-07-09 (tagged release)
+
+Everything below — the initial 2026-07-06 build plus the scope-confinement
+audit and review-pass fixes that followed it — ships together as the first
+tagged release, `v0.1.0`.
 
 ### Changed (scope-confinement audit, 2026-07-07)
 
@@ -60,9 +64,9 @@
 - `bulk_update_hosts` plan phase excludes out-of-scope hosts entirely (they
   become error rows) rather than echoing their name/description.
 
-## v0.1.0 — 2026-07-06 (first release)
+### Initial build (2026-07-06)
 
-First release of Arborist, an MCP server for [Scanopy](https://scanopy.net)
+First build of Arborist, an MCP server for [Scanopy](https://scanopy.net)
 (verified against Scanopy 0.17.3; supported range `>=0.17.2,<0.18.0`).
 
 ### Core

@@ -62,3 +62,46 @@
   - No loop-status restatements were found in `CURRENT_STATE.md` beyond the
     `LOOP-0021` citation above; `OPEN_LOOPS.md`'s `LOOP-001` entry is
     unchanged.
+
+## 2026-07-09 — LOOP-001 closed: publish, v0.1.0 tagged and released
+
+- Filled the `OWNER` placeholder with `StarlightDaemon` (GitHub URLs) /
+  `starlightdaemon` (lowercase GHCR image refs) across 9 files, 31
+  occurrences: `README.md`, `docs/usage-guide.md`, `pyproject.toml`,
+  `deploy/docker/docker-compose.yml`, `deploy/podman/arborist.container`,
+  `deploy/podman/README.md`, `deploy/lxc/ct/arborist.sh`,
+  `deploy/lxc/install/arborist-install.sh`, `deploy/lxc/README.md`.
+- Found and fixed a latent bug while doing this: every install/clone/raw-
+  fetch URL in the repo was built against `scanopy-arborist-mcp` as the
+  GitHub repo name, but the actual remote (created 2026-07-08, per the
+  first entry above) is `scanopy-arborist` — no `-mcp` suffix. Those URLs
+  would have 404'd even with `OWNER` correctly filled in. Fixed in `README.md`,
+  `RELEASE.md`, `docs/usage-guide.md`, the three LXC scripts/docs, and
+  `pyproject.toml`'s `Homepage`. Left `scanopy-arborist-mcp` alone where
+  it's a genuinely separate namespace, not a broken link: the PyPI/package
+  `name` in `pyproject.toml` and the GHCR image name (both conventionally
+  differ from a git repo's name).
+- Bumped the stale `0.1.0b1` beta suffix to `0.1.0` in `pyproject.toml` and
+  `src/arborist/__init__.py` so the tag, the package version, and
+  `arborist --version` all agree.
+- Merged `CHANGELOG.md`'s `## Unreleased` (2026-07-07 scope-confinement
+  audit + second-review-pass fixes) into the `## v0.1.0` entry, since both
+  ship together in this first tag — there was never a prior release for
+  "Unreleased" to be relative to.
+- Verified green before tagging: `uv run ruff check src tests` clean;
+  `uv run pytest tests/unit -q` 174 passed; `uv run arborist --version`
+  prints `arborist 0.1.0`.
+- Committed this work as `release: v0.1.0 — fill owner, close LOOP-001` on
+  `main`, tagged `v0.1.0` (annotated) at that commit, pushed both, and
+  published the GitHub release with `gh release create v0.1.0` using the
+  `CHANGELOG.md` v0.1.0 entry as notes:
+  https://github.com/StarlightDaemon/scanopy-arborist/releases/tag/v0.1.0
+  (see `git log`/`git tag -n` for the exact commit and tag SHAs — not
+  duplicated here per the Fact-Home Rule).
+- Verified post-publish: `gh release view v0.1.0` succeeds, working tree
+  porcelain-clean, `git grep -c OWNER` sums to 11 remaining hits — all
+  legitimate (this loop's own closure record, `GOALS.md`'s "Done" milestone
+  description, and `RELEASE.md`/`docs/verification-real-vm.md`/the LOOP-002
+  bounded-task prompt referring to the concept or to history, not an
+  unresolved placeholder).
+- Closes `LOOP-001`.

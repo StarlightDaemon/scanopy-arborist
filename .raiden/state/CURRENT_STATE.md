@@ -14,8 +14,11 @@
   structural blind spot (tags on user API keys are unreadable under API-key
   auth). See `docs/scope-confinement-audit.md`.
 - Confirmed: deployment assets exist for Docker Compose, Podman Quadlet, and
-  Proxmox LXC (`deploy/`), all still keyed on an `OWNER` placeholder pending
-  publish.
+  Proxmox LXC (`deploy/`), now keyed on the real owner (`StarlightDaemon` /
+  `starlightdaemon` for lowercase image refs) as of the `v0.1.0` publish
+  (LOOP-001, 2026-07-09). No container image has been pushed to GHCR yet;
+  from-source and from-git-tag installs are the supported paths for this
+  release.
 - Confirmed: test suite and `.github/` CI workflow are in place; `.venv`,
   `.pytest_cache`, `.ruff_cache` present from local dev.
 - Confirmed: RAIDEN Instance installed 2026-07-08. Repo now
@@ -24,9 +27,11 @@
 
 ## Constraints
 
-- Confirmed: not yet published — `OWNER` is still a literal placeholder in
-  `pyproject.toml`, the deploy configs, and docs. From-source install only
-  until RELEASE.md's tag-cut sequence runs against the new remote.
+- Confirmed: published — `v0.1.0` tagged and released on
+  `github.com/StarlightDaemon/scanopy-arborist` (LOOP-001, 2026-07-09), per
+  RELEASE.md's tag-cut sequence. `pyproject.toml` version and
+  `arborist --version` both read `0.1.0` (the prior `0.1.0b1` beta suffix is
+  gone).
 - Confirmed: verified live only against Scanopy 0.17.3 (`>=0.17.2,<0.18.0`);
   Arborist refuses to start outside that range by design.
 

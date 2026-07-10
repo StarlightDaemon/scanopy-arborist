@@ -5,4 +5,4 @@ curates only the user-owned overlay (names, descriptions, visibility, tags,
 bindings). It never mutates the discovered layer.
 """
 
-__version__ = "0.1.0b1"
+__version__ = "0.1.0"

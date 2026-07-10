@@ -25,7 +25,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Container]
-Image=ghcr.io/OWNER/scanopy-arborist-mcp:latest
+Image=ghcr.io/starlightdaemon/scanopy-arborist-mcp:latest
 ContainerName=arborist
 
 # Loopback-only publish: only this machine (or a reverse proxy on it) can reach

@@ -9,8 +9,10 @@ executed by tooling; run each step yourself after reviewing.
 - `OWNER` replaced with the real GitHub org/user everywhere
   (`grep -rn OWNER --include='*.toml' --include='*.yml' --include='*.md' --include='*.container' --include='*.sh' .`
   should return nothing unexpected). Remember: lowercase for image references.
-- A GitHub repository `github.com/<owner>/scanopy-arborist-mcp` with `main`
-  pushed, and `gh` authenticated.
+- A GitHub repository `github.com/<owner>/scanopy-arborist` with `main`
+  pushed, and `gh` authenticated. (The git repo name is `scanopy-arborist`;
+  `scanopy-arborist-mcp` is the PyPI/package name and the GHCR image name —
+  they intentionally differ from the repo name.)
 - The full test suite green against a disposable Scanopy instance:
   `uv run pytest tests/ -q` (see README "Development" for standing one up).
 
@@ -49,6 +51,6 @@ docker push ghcr.io/<owner>/scanopy-arborist-mcp:latest
 
 ## Post-release
 
-- Verify `pip install git+https://github.com/<owner>/scanopy-arborist-mcp.git@v0.1.0`
+- Verify `pip install git+https://github.com/<owner>/scanopy-arborist.git@v0.1.0`
   installs and `arborist --version` prints `arborist 0.1.0`.
 - PyPI publishing is deliberately out of scope for v0.1.0.

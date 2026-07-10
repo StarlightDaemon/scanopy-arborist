@@ -9,7 +9,7 @@
 
 services:
   arborist:
-    image: ghcr.io/OWNER/scanopy-arborist-mcp:latest
+    image: ghcr.io/starlightdaemon/scanopy-arborist-mcp:latest
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile

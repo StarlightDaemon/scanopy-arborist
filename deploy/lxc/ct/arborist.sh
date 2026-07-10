@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
 # Copyright (c) 2021-2026 community-scripts ORG
-# Author: OWNER
+# Author: StarlightDaemon
 # License: MIT | https://github.com/community-scripts/ProxmoxVE/raw/main/LICENSE
-# Source: https://github.com/OWNER/scanopy-arborist-mcp
+# Source: https://github.com/StarlightDaemon/scanopy-arborist
 
 APP="Arborist"
 var_tags="${var_tags:-mcp;network}"
@@ -29,7 +29,7 @@ function update_script() {
     exit
   fi
 
-  if check_for_gh_release "arborist" "OWNER/scanopy-arborist-mcp"; then
+  if check_for_gh_release "arborist" "StarlightDaemon/scanopy-arborist"; then
     msg_info "Stopping Service"
     systemctl stop arborist
     msg_ok "Stopped Service"
@@ -38,7 +38,7 @@ function update_script() {
     cp /opt/arborist/.env /opt/arborist.env
     msg_ok "Backed up Configuration"
 
-    fetch_and_deploy_gh_release "arborist" "OWNER/scanopy-arborist-mcp" "tarball" "latest" "/opt/arborist"
+    fetch_and_deploy_gh_release "arborist" "StarlightDaemon/scanopy-arborist" "tarball" "latest" "/opt/arborist"
 
     msg_info "Updating Arborist"
     cd /opt/arborist

@@ -16,7 +16,7 @@ Arborist into it:
 On the Proxmox VE host shell:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/OWNER/scanopy-arborist-mcp/main/deploy/lxc/ct/arborist.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/StarlightDaemon/scanopy-arborist/main/deploy/lxc/ct/arborist.sh)"
 ```
 
 Re-running the same command inside an existing Arborist container (or choosing
@@ -47,7 +47,7 @@ until that happens:
 ## What gets installed
 
 - `uv`/`uvx` in `/usr/local/bin` (via community-scripts `setup_uv`).
-- The latest `OWNER/scanopy-arborist-mcp` release tarball in `/opt/arborist`,
+- The latest `StarlightDaemon/scanopy-arborist` release tarball in `/opt/arborist`,
   with a locked, no-dev virtualenv at `/opt/arborist/.venv`
   (`uv sync --locked --no-dev`).
 - `/opt/arborist/.env` (mode 600) containing a freshly generated

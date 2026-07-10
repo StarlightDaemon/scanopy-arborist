@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
 # Copyright (c) 2021-2026 community-scripts ORG
-# Author: OWNER
+# Author: StarlightDaemon
 # License: MIT | https://github.com/community-scripts/ProxmoxVE/raw/main/LICENSE
-# Source: https://github.com/OWNER/scanopy-arborist-mcp
+# Source: https://github.com/StarlightDaemon/scanopy-arborist
 
 source /dev/stdin <<<"$FUNCTIONS_FILE_PATH"
 color
@@ -14,7 +14,7 @@ network_check
 update_os
 
 USE_UVX="YES" setup_uv
-fetch_and_deploy_gh_release "Arborist" "OWNER/scanopy-arborist-mcp" "tarball" "latest" "/opt/arborist"
+fetch_and_deploy_gh_release "Arborist" "StarlightDaemon/scanopy-arborist" "tarball" "latest" "/opt/arborist"
 
 msg_info "Installing Arborist"
 cd /opt/arborist

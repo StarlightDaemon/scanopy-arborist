@@ -1,12 +1,7 @@
-<!-- mcp-name: io.github.OWNER/scanopy-arborist-mcp -->
+<!-- mcp-name: io.github.StarlightDaemon/scanopy-arborist-mcp -->
 # Arborist
 
 **An MCP server for [Scanopy](https://scanopy.net)** — query your self-hosted network topology from Claude (or any MCP client) and curate the human-owned overlay without ever touching what the scanner discovered.
-
-> **`OWNER` is a placeholder.** Replace it with your GitHub username/org (lowercase —
-> container registries reject uppercase image names) before building or publishing. It
-> appears in `pyproject.toml`, `deploy/docker/docker-compose.yml`,
-> `deploy/podman/arborist.container`, the `deploy/lxc/` scripts, and this README.
 
 The name plays on *scan* + *canopy*: an arborist tends the canopy view — pruning names, shaping tags, deciding what is visible — without touching the tree's structural integrity.
 
@@ -55,8 +50,8 @@ Install the `arborist` command (Python ≥ 3.11). v0.1.0 is distributed from the
 repository, not PyPI:
 
 ```sh
-uv tool install git+https://github.com/OWNER/scanopy-arborist-mcp.git@v0.1.0
-# or: pip install git+https://github.com/OWNER/scanopy-arborist-mcp.git@v0.1.0
+uv tool install git+https://github.com/StarlightDaemon/scanopy-arborist.git@v0.1.0
+# or: pip install git+https://github.com/StarlightDaemon/scanopy-arborist.git@v0.1.0
 ```
 
 ### Claude Code (stdio)
@@ -79,7 +74,7 @@ Add `-e ARBORIST_PROFILE=readwrite` to enable the curation tools.
   "mcpServers": {
     "arborist": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/OWNER/scanopy-arborist-mcp.git@v0.1.0", "arborist"],
+      "args": ["--from", "git+https://github.com/StarlightDaemon/scanopy-arborist.git@v0.1.0", "arborist"],
       "env": {
         "SCANOPY_BASE_URL": "http://scanopy.lan:60072",
         "SCANOPY_API_KEY": "scp_u_xxxxxxxx"
@@ -246,8 +241,8 @@ Secrets are injected as env vars at runtime and never appear in the unit file or
 ## Development
 
 ```sh
-git clone https://github.com/OWNER/scanopy-arborist-mcp
-cd scanopy-arborist-mcp
+git clone https://github.com/StarlightDaemon/scanopy-arborist
+cd scanopy-arborist
 uv sync
 uv run pytest tests/unit             # unit tests — no network needed
 ```

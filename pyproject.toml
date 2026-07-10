@@ -1,6 +1,6 @@
 [project]
 name = "scanopy-arborist-mcp"
-version = "0.1.0b1"
+version = "0.1.0"
 description = "Arborist — an MCP server for Scanopy. Query your network topology from Claude and curate the user-owned overlay (names, tags, visibility) without ever touching what the scanner discovered."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,7 +19,7 @@ dependencies = [
 arborist = "arborist.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/OWNER/scanopy-arborist-mcp"
+Homepage = "https://github.com/StarlightDaemon/scanopy-arborist"
 
 [dependency-groups]
 dev = [
