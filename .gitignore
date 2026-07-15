@@ -13,3 +13,7 @@ dist/
 audit-reports/
 .raiden/state/AUDIT_LOG.md
 .raiden/state/last-audit.md
+
+# macOS
+._*
+.DS_Store
