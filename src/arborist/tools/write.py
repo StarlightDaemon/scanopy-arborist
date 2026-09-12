@@ -180,7 +180,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
                     continue
             try:
                 record = await client.resolve_host(sel)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001  # per-host: collect, don't abort the batch
                 errors.append({"host": sel, "error": str(exc)})
                 continue
             # Exclude out-of-scope hosts from the plan entirely (don't surface
@@ -219,11 +219,11 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
                 await client.update_host_curated(
                     record["id"],
                     name=u.get("name"),
-                    description=u["description"] if "description" in u else _UNSET,
+                    description=u.get("description", _UNSET),
                     hidden=u.get("hidden"),
                 )
                 applied.append(record.get("name"))
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001  # per-host: report as failed, keep applying
                 failed.append({"host": record.get("name"), "error": str(exc)})
         return redact({"mode": "applied", "applied": applied, "failed": failed})
 

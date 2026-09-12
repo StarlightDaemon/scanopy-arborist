@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import re
 import uuid as uuid_mod
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any, ClassVar
 
 import anyio
 import httpx
@@ -495,7 +496,7 @@ class ScanopyClient:
     #   "network_ids:<field>" — org-scoped record carrying a LIST of network
     #       ids under <field>; an empty list means the record is attributable
     #       to no network at all (treated as outside any scope — fail closed)
-    _TAG_USAGE_SOURCES: dict[str, tuple[str, str]] = {
+    _TAG_USAGE_SOURCES: ClassVar[dict[str, tuple[str, str]]] = {
         "Host": ("/api/v1/hosts", "network_id"),
         "Service": ("/api/v1/services", "network_id"),
         "Subnet": ("/api/v1/subnets", "network_id"),

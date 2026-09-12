@@ -8,10 +8,10 @@ Two deliberately distinct env prefixes:
 from __future__ import annotations
 
 import ipaddress
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Mapping
 
 from .errors import ConfigError, TransportSecurityError
 
@@ -79,7 +79,7 @@ class Config:
     allow_untested_version: bool = False
 
     @classmethod
-    def from_env(cls, env: Mapping[str, str]) -> "Config":
+    def from_env(cls, env: Mapping[str, str]) -> Config:
         errors: list[str] = []
 
         base_url = env.get("SCANOPY_BASE_URL", "").strip().rstrip("/")

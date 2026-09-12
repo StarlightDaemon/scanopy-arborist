@@ -17,8 +17,9 @@ from __future__ import annotations
 import os
 import random
 import uuid
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 from urllib.parse import urlsplit
 
 import anyio
