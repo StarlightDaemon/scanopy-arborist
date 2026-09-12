@@ -114,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
     except ArboristError as exc:
         print(f"arborist: cannot reach Scanopy: {exc}", file=sys.stderr)
         return EXIT_UNREACHABLE
-    except Exception as exc:  # connection refused, DNS, TLS handshake...
+    except Exception as exc:  # noqa: BLE001  # connection refused, DNS, TLS handshake...
         print(
             f"arborist: cannot reach Scanopy at {cfg.base_url}: {exc}\n"
             "Check SCANOPY_BASE_URL and TLS settings (SCANOPY_TLS_VERIFY / "
